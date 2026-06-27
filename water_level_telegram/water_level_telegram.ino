@@ -24,8 +24,7 @@ const char* WIFI_PASSWORD = "98337606";
 const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 
 
-// Wi-Fi and Telegram notifications configuration
-const bool ENABLE_WIFI_TELEGRAM = true;
+
 
 // Sensor logic
 const bool SENSOR_LOW_MEANS_WATER_PRESENT = true;
@@ -46,7 +45,6 @@ UniversalTelegramBot bot(BOT_TOKEN, securedClient);
 bool rawWaterPresent = false;
 bool stableWaterPresent = false;
 bool lastRawWaterPresent = false;
-bool lastStableWaterPresent = false;
 bool lastNotifiedEmpty = false;
 int lastPrintedPinState = -1;
 
@@ -529,9 +527,7 @@ void setup() {
 
   pinMode(WATER_SENSOR_PIN, INPUT);
 
-  if (ENABLE_WIFI_TELEGRAM) {
-    loadSubscribers();
-  }
+  loadSubscribers();
 
   // Initialize Buzzer
   ledcAttach(BUZZER_PIN, 2000, BUZZER_RESOLUTION);
@@ -543,37 +539,32 @@ void setup() {
   setLed(colorBlue());
 
   // Initialize WiFi & Background Task
-  if (ENABLE_WIFI_TELEGRAM) {
-    WiFi.mode(WIFI_STA);
-    WiFi.setTxPower(WIFI_POWER_8_5dBm);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    Serial.println("Connecting to WiFi...");
+  WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("Connecting to WiFi...");
 
-    xTaskCreatePinnedToCore(
-      telegramTask,
-      "TelegramTask",
-      8192,
-      NULL,
-      1,
-      NULL,
-      0
-    );
-  }
+  xTaskCreatePinnedToCore(
+    telegramTask,
+    "TelegramTask",
+    8192,
+    NULL,
+    1,
+    NULL,
+    0
+  );
 
   // Initial read
   rawWaterPresent = readWaterSensor();
   lastRawWaterPresent = rawWaterPresent;
   stableWaterPresent = rawWaterPresent;
-  lastStableWaterPresent = stableWaterPresent;
   rawChangedAt = millis();
   lastPrintedPinState = digitalRead(WATER_SENSOR_PIN);
   printSensorStatus("START", lastPrintedPinState);
 }
 
 void loop() {
-  if (ENABLE_WIFI_TELEGRAM) {
-    monitorWiFi();
-  }
+  monitorWiFi();
 
   updateSensorState();
 
@@ -583,16 +574,10 @@ void loop() {
     printSensorStatus("CHANGED", currentPinState);
   }
 
-  if (stableWaterPresent != lastStableWaterPresent) {
-    lastStableWaterPresent = stableWaterPresent;
-  }
-
   updateWaterLed(stableWaterPresent);
   updateWaterBuzzer(stableWaterPresent);
 
-  if (ENABLE_WIFI_TELEGRAM) {
-    handleNotifications();
-  }
+  handleNotifications();
 
   delay(20);
 }
