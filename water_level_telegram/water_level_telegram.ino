@@ -30,7 +30,7 @@ const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 const bool SENSOR_LOW_MEANS_WATER_PRESENT = true;
 
 // Timing
-const unsigned long SENSOR_DEBOUNCE_MS = 300;
+const unsigned long SENSOR_DEBOUNCE_MS = 5000;
 const unsigned long TELEGRAM_MIN_REPEAT_MS = 30UL * 60UL * 1000UL;
 const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
 const unsigned long LED_EMPTY_FADE_MS = 3000;
