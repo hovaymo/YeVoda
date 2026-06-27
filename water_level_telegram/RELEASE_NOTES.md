@@ -3,6 +3,7 @@
 ## [v1.1] - 2026-06-28
 ### Added
 - **Robotic Alarm Melodies**: Ported Everton Ramires' `CuteBuzzerSounds` player logic (containing `S_HAPPY`, `S_CUDDLY`, `S_SUPER_HAPPY`, etc.) directly into the sketch to cycle sounds on consecutive triggers.
+- **Web Melody Selector Spoiler**: Added a collapsible settings panel in the config portal allowing users to choose their alarm sound. Options include cycling all sounds sequentially (default) or locking to a single melody. Selection triggers a 4-second preview loop on the device buzzer immediately.
 - **Buzzer Melody Looping**: Melodies loop continuously during empty tank alarms with a quick 0.2s pause.
 - **Interruptible Melody Playback**: Embedded non-blocking sub-delays (10ms steps) checking sensor state in real-time. Melodies stop instantly (within 10ms) when water returns.
 - **Decoupled LED Blinking**: LED blinking continues at its 0.5s rate in real-time even during active melody playback, preventing CPU freeze states.

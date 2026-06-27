@@ -42,8 +42,10 @@ const unsigned long LED_RED_BLINK_MS = 250;
 extern bool stableWaterPresent;
 class WebServer;
 extern WebServer webServer;
+extern int melodyMode;
 void updateSensorState();
 void updateWaterLed(bool waterPresent);
+void handleSetMelody();
 
 enum TelegramMessage {
   MSG_NONE,
@@ -177,6 +179,7 @@ String wifiSsid = "";
 String wifiPassword = "";
 bool ledEnabled = true;
 bool buzzerEnabled = true;
+int melodyMode = 0;
 
 bool apModeActive = false;
 bool wifiConnecting = true;
@@ -306,6 +309,26 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
     border-color: #f59e0b;
     box-shadow: none;
   }
+  select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 10px;
+    border: 1px solid #334155;
+    background-color: #17171f;
+    color: #f8fafc;
+    border-radius: 6px;
+    font-size: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg fill='%23f59e0b' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+  }
+  select:focus {
+    border-color: #f59e0b;
+  }
   .btn {
     width: 100%;
     padding: 14px;
@@ -407,6 +430,26 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
     </div>
   </details>
   
+  <details>
+    <summary>Вибір мелодії</summary>
+    <div class="spoiler-content">
+      <div class="group">
+        <label>Мелодія тривоги</label>
+        <select id="melody-select" onchange="setMelody(this.value)">
+          <option value="0" %MELODY_SEL_0%>Всі мелодії по колу 🔁</option>
+          <option value="1" %MELODY_SEL_1%>Весела 🤖</option>
+          <option value="2" %MELODY_SEL_2%>Ніжна 🥰</option>
+          <option value="3" %MELODY_SEL_3%>Ультра-весела 🎉</option>
+          <option value="4" %MELODY_SEL_4%>Упс! 🙊</option>
+          <option value="5" %MELODY_SEL_5%>Здивування 😲</option>
+          <option value="6" %MELODY_SEL_6%>З'єднання 📡</option>
+          <option value="7" %MELODY_SEL_7%>Робот 👾</option>
+          <option value="8" %MELODY_SEL_8%>Стрибок 🦘</option>
+        </select>
+      </div>
+    </div>
+  </details>
+  
   <div class="divider"></div>
   
   <div class="toggle-row">
@@ -457,6 +500,11 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
     var chk = document.getElementById(type + '-chk').checked;
     fetch('/toggle?type=' + type + '&val=' + (chk ? '1' : '0'));
     // Force keyboard dismiss and prevent focus shifting
+    document.querySelectorAll('input[type="text"], input[type="password"]').forEach(el => el.blur());
+  }
+
+  function setMelody(val) {
+    fetch('/set_melody?val=' + val);
     document.querySelectorAll('input[type="text"], input[type="password"]').forEach(el => el.blur());
   }
 
@@ -830,9 +878,11 @@ void updateWaterBuzzer(bool waterPresent) {
     return;
   }
 
-  // After 5 seconds, play the current melody in a loop with a 4-second pause
+  // After 5 seconds, play the current melody in a loop with a 0.2-second pause
   if (!alarmMelodyPlayed) {
-    playCuteSound(currentMelodyIndex);
+    int targetMelodyIdx = (melodyMode == 0) ? currentMelodyIndex : (melodyMode - 1);
+    playCuteSound(targetMelodyIdx);
+    
     alarmMelodyPlayed = true;
     lastMelodyFinishedAt = millis();
   } else {
@@ -893,7 +943,51 @@ void serveConfigPage() {
   html.replace("%PASS%", wifiPassword);
   html.replace("%LED_CHECKED%", ledEnabled ? "checked" : "");
   html.replace("%BUZ_CHECKED%", buzzerEnabled ? "checked" : "");
+  
+  for (int i = 0; i <= 8; i++) {
+    String placeholder = "%MELODY_SEL_" + String(i) + "%";
+    String replacement = (melodyMode == i) ? "selected" : "";
+    html.replace(placeholder, replacement);
+  }
+
   webServer.send(200, "text/html", html);
+}
+
+void playPreview(int melodyIdx) {
+  unsigned long start = millis();
+  while (millis() - start < 4000) {
+    playCuteSound(melodyIdx);
+    
+    // Pause between loops (0.2s pause)
+    unsigned long pauseStart = millis();
+    while (millis() - pauseStart < 200) {
+      updateSensorState();
+      updateWaterLed(stableWaterPresent);
+      webServer.handleClient(); // Keep processing web server clients
+      delay(10);
+    }
+  }
+  buzzerOff();
+}
+
+void handleSetMelody() {
+  if (webServer.hasArg("val")) {
+    int val = webServer.arg("val").toInt();
+    melodyMode = val;
+    
+    preferences.begin("wifi_config", false);
+    preferences.putInt("melody_mode", melodyMode);
+    preferences.end();
+    
+    webServer.send(200, "text/plain", "OK");
+    
+    // If a specific melody is selected (1-8), play a 4s preview loop
+    if (melodyMode >= 1 && melodyMode <= 8) {
+      playPreview(melodyMode - 1);
+    }
+  } else {
+    webServer.send(400, "text/plain", "Bad Request");
+  }
 }
 
 void handleSave() {
@@ -1247,6 +1341,7 @@ void setup() {
   wifiPassword = preferences.getString("pass", DEFAULT_WIFI_PASSWORD);
   ledEnabled = preferences.getBool("led_en", true);
   buzzerEnabled = preferences.getBool("buz_en", true);
+  melodyMode = preferences.getInt("melody_mode", 0);
   preferences.end();
 
   // Initialize WiFi & Background Task
@@ -1262,6 +1357,7 @@ void setup() {
   webServer.on("/save", HTTP_POST, handleSave);
   webServer.on("/toggle", HTTP_GET, handleToggle);
   webServer.on("/status_json", HTTP_GET, handleStatusJson);
+  webServer.on("/set_melody", HTTP_GET, handleSetMelody);
   webServer.onNotFound([]() {
     serveConfigPage();
   });
