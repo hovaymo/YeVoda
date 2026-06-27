@@ -22,7 +22,7 @@ const char* WIFI_PASSWORD = "98337606";
 
 // Telegram
 const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
-const char* CHAT_ID = "-1004435895448"; // Channel ID "Є вода?"
+
 
 // Wi-Fi and Telegram notifications configuration
 const bool ENABLE_WIFI_TELEGRAM = true;
@@ -380,52 +380,56 @@ void telegramTask(void* parameter) {
       }
 
       if (text.length() > 0) {
-        bool success = false;
-        int attempts = 0;
-        
-        while (!success && attempts < 5) {
-          while (WiFi.status() != WL_CONNECTED) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-          }
-
-          time_t nowTime = time(nullptr);
-          while (nowTime < 1700000000) {
-            vTaskDelay(pdMS_TO_TICKS(1500));
-            nowTime = time(nullptr);
-          }
-
-          if (pendingTelegramMessage != MSG_NONE) {
-            break;
-          }
-
-          Serial.print("Telegram task sending: ");
-          Serial.println(text);
-          isTelegramActive = true;
-          securedClient.stop(); // Clean socket before request
-          securedClient.setInsecure();
+        if (subscriberCount == 0) {
+          Serial.println("No subscribers registered. Skipping Telegram notification.");
+        } else {
+          bool success = false;
+          int attempts = 0;
           
-          // 1. Send to public Channel ID
-          success = bot.sendMessage(CHAT_ID, text, "");
-          
-          // 2. Send to all private chat subscribers who sent /start
-          for (int i = 0; i < subscriberCount; i++) {
-            if (subscribers[i].length() > 0) {
-              bot.sendMessage(subscribers[i], text, "");
+          while (!success && attempts < 5) {
+            while (WiFi.status() != WL_CONNECTED) {
+              vTaskDelay(pdMS_TO_TICKS(1000));
             }
-          }
-          
-          isTelegramActive = false;
-          
-          if (success) {
-            Serial.println("Telegram send SUCCESS");
-          } else {
-            char err_buf[100];
-            securedClient.lastError(err_buf, 100);
-            Serial.print("Telegram send FAILED. SSL error: ");
-            Serial.println(err_buf);
-            Serial.println("Retrying in 5 seconds...");
-            attempts++;
-            vTaskDelay(pdMS_TO_TICKS(5000));
+
+            time_t nowTime = time(nullptr);
+            while (nowTime < 1700000000) {
+              vTaskDelay(pdMS_TO_TICKS(1500));
+              nowTime = time(nullptr);
+            }
+
+            if (pendingTelegramMessage != MSG_NONE) {
+              break;
+            }
+
+            Serial.print("Telegram task sending: ");
+            Serial.println(text);
+            isTelegramActive = true;
+            securedClient.stop(); // Clean socket before request
+            securedClient.setInsecure();
+            
+            // Send to all private chat subscribers who sent /start
+            success = false;
+            for (int i = 0; i < subscriberCount; i++) {
+              if (subscribers[i].length() > 0) {
+                if (bot.sendMessage(subscribers[i], text, "")) {
+                  success = true; // Mark as success if at least one succeeds
+                }
+              }
+            }
+            
+            isTelegramActive = false;
+            
+            if (success) {
+              Serial.println("Telegram send SUCCESS");
+            } else {
+              char err_buf[100];
+              securedClient.lastError(err_buf, 100);
+              Serial.print("Telegram send FAILED. SSL error: ");
+              Serial.println(err_buf);
+              Serial.println("Retrying in 5 seconds...");
+              attempts++;
+              vTaskDelay(pdMS_TO_TICKS(5000));
+            }
           }
         }
       }
