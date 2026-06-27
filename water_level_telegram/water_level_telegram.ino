@@ -63,77 +63,83 @@ enum TelegramMessage {
 volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
 volatile bool isTelegramActive = false;
 
-// Subscriber management using ESP32 Preferences
+// Subscriber management using ESP32 Preferences (up to 20 clients)
 Preferences preferences;
-const int MAX_SUBSCRIBERS = 10;
-String subscribers[MAX_SUBSCRIBERS];
-int subscriberCount = 0;
+const int MAX_USERS = 20;
+String users[MAX_USERS];
+bool wantsNotifications[MAX_USERS];
+int userCount = 0;
 
 void loadSubscribers() {
-  preferences.begin("tg_subs", false);
-  subscriberCount = preferences.getInt("count", 0);
-  if (subscriberCount > MAX_SUBSCRIBERS) {
-    subscriberCount = MAX_SUBSCRIBERS;
+  preferences.begin("tg_users", false);
+  userCount = preferences.getInt("count", 0);
+  if (userCount > MAX_USERS) {
+    userCount = MAX_USERS;
   }
-  for (int i = 0; i < subscriberCount; i++) {
-    subscribers[i] = preferences.getString(("s" + String(i)).c_str(), "");
+  for (int i = 0; i < userCount; i++) {
+    users[i] = preferences.getString(("u" + String(i)).c_str(), "");
+    wantsNotifications[i] = preferences.getBool(("n" + String(i)).c_str(), false);
   }
   preferences.end();
   Serial.print("Loaded ");
-  Serial.print(subscriberCount);
-  Serial.println(" subscribers.");
+  Serial.print(userCount);
+  Serial.println(" users.");
 }
 
-void saveSubscribers() {
-  preferences.begin("tg_subs", false);
-  preferences.putInt("count", subscriberCount);
-  for (int i = 0; i < subscriberCount; i++) {
-    preferences.putString(("s" + String(i)).c_str(), subscribers[i]);
-  }
+void saveUser(int index) {
+  preferences.begin("tg_users", false);
+  preferences.putString(("u" + String(index)).c_str(), users[index]);
+  preferences.putBool(("n" + String(index)).c_str(), wantsNotifications[index]);
+  preferences.putInt("count", userCount);
   preferences.end();
 }
 
-bool addSubscriber(const String& chatId) {
-  for (int i = 0; i < subscriberCount; i++) {
-    if (subscribers[i] == chatId) {
-      return false; // Already subscribed
+void registerUser(const String& chatId) {
+  for (int i = 0; i < userCount; i++) {
+    if (users[i] == chatId) {
+      return; // Already registered
     }
   }
-  if (subscriberCount < MAX_SUBSCRIBERS) {
-    subscribers[subscriberCount] = chatId;
-    subscriberCount++;
-    saveSubscribers();
-    Serial.print("Added subscriber: ");
+  if (userCount < MAX_USERS) {
+    users[userCount] = chatId;
+    wantsNotifications[userCount] = true; // Subscribed by default when first starting the bot
+    userCount++;
+    saveUser(userCount - 1);
+    Serial.print("Registered new user: ");
     Serial.println(chatId);
-    return true;
   }
-  return false; // List full
 }
 
-bool removeSubscriber(const String& chatId) {
-  int foundIndex = -1;
-  for (int i = 0; i < subscriberCount; i++) {
-    if (subscribers[i] == chatId) {
-      foundIndex = i;
-      break;
+void setNotificationPreference(const String& chatId, bool enable) {
+  registerUser(chatId); // Ensure they are registered first
+  
+  for (int i = 0; i < userCount; i++) {
+    if (users[i] == chatId) {
+      if (wantsNotifications[i] != enable) {
+        wantsNotifications[i] = enable;
+        saveUser(i);
+        Serial.print("Updated notification preference for ");
+        Serial.print(chatId);
+        Serial.print(" to ");
+        Serial.println(enable ? "ENABLED" : "DISABLED");
+      }
+      return;
     }
   }
-  if (foundIndex != -1) {
-    for (int i = foundIndex; i < subscriberCount - 1; i++) {
-      subscribers[i] = subscribers[i + 1];
+}
+
+bool isSubscribed(const String& chatId) {
+  for (int i = 0; i < userCount; i++) {
+    if (users[i] == chatId) {
+      return wantsNotifications[i];
     }
-    subscriberCount--;
-    saveSubscribers();
-    Serial.print("Removed subscriber: ");
-    Serial.println(chatId);
-    return true;
   }
   return false;
 }
 
-bool isSubscribed(const String& chatId) {
-  for (int i = 0; i < subscriberCount; i++) {
-    if (subscribers[i] == chatId) {
+bool hasActiveSubscribers() {
+  for (int i = 0; i < userCount; i++) {
+    if (wantsNotifications[i]) {
       return true;
     }
   }
@@ -371,8 +377,8 @@ void telegramTask(void* parameter) {
       }
 
       if (text.length() > 0) {
-        if (subscriberCount == 0) {
-          Serial.println("No subscribers registered. Skipping Telegram notification.");
+        if (!hasActiveSubscribers()) {
+          Serial.println("No active subscribers. Skipping Telegram notification.");
         } else {
           bool success = false;
           int attempts = 0;
@@ -394,11 +400,11 @@ void telegramTask(void* parameter) {
             securedClient.stop(); // Clean socket before request
             securedClient.setInsecure();
             
-            // Send to all private chat subscribers who sent /start
+            // Send only to active subscribers
             success = false;
-            for (int i = 0; i < subscriberCount; i++) {
-              if (subscribers[i].length() > 0) {
-                if (bot.sendMessage(subscribers[i], text, "")) {
+            for (int i = 0; i < userCount; i++) {
+              if (users[i].length() > 0 && wantsNotifications[i]) {
+                if (bot.sendMessage(users[i], text, "")) {
                   success = true; // Mark as success if at least one succeeds
                 }
               }
@@ -444,14 +450,15 @@ void telegramTask(void* parameter) {
           String text = bot.messages[i].text;
 
           if (text == "/start") {
+            registerUser(chatId);
             sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
           } 
           else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
-            addSubscriber(chatId);
+            setNotificationPreference(chatId, true);
             sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
           }
           else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
-            removeSubscriber(chatId);
+            setNotificationPreference(chatId, false);
             sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
           }
           else if (text == "Є вода?" || text == "/status") {
