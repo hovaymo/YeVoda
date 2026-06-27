@@ -493,6 +493,9 @@ void telegramPollingTask(void* parameter) {
             }
 
             String chatId = String(bot.messages[i].chat_id);
+            if (chatId.startsWith("-")) {
+              continue; // Ignore group chats, supergroups, and channels entirely
+            }
             String text = bot.messages[i].text;
 
             if (text == "/start") {
