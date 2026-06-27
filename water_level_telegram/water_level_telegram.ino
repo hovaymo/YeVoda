@@ -43,6 +43,12 @@ extern bool stableWaterPresent;
 class WebServer;
 extern WebServer webServer;
 extern int melodyMode;
+extern bool previewActive;
+extern int previewMelodyIndex;
+extern unsigned long previewStartedAt;
+extern bool previewMelodyPlayed;
+extern unsigned long lastPreviewMelodyFinishedAt;
+
 void updateSensorState();
 void updateWaterLed(bool waterPresent);
 void handleSetMelody();
@@ -79,7 +85,7 @@ bool delayBuzzerLoop(unsigned long duration) {
     updateWaterLed(stableWaterPresent);
     webServer.handleClient(); // Keep the web server fully responsive!
     
-    if (stableWaterPresent) {
+    if (stableWaterPresent && !previewActive) {
       noTone(BUZZER_PIN);
       return false; // Abort
     }
@@ -90,7 +96,7 @@ bool delayBuzzerLoop(unsigned long duration) {
 
 bool _cuteTone(float noteFrequency, long noteDuration, int silentDuration) {
   updateSensorState();
-  if (stableWaterPresent) {
+  if (stableWaterPresent && !previewActive) {
     noTone(BUZZER_PIN);
     return false;
   }
@@ -180,6 +186,12 @@ String wifiPassword = "";
 bool ledEnabled = true;
 bool buzzerEnabled = true;
 int melodyMode = 0;
+
+bool previewActive = false;
+int previewMelodyIndex = 0;
+unsigned long previewStartedAt = 0;
+bool previewMelodyPlayed = false;
+unsigned long lastPreviewMelodyFinishedAt = 0;
 
 bool apModeActive = false;
 bool wifiConnecting = true;
@@ -411,7 +423,7 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
   </div>
   
   <details %SPOILER_STATE%>
-    <summary>Налаштування Wi-Fi</summary>
+    <summary>Налаштування</summary>
     <div class="spoiler-content">
       <form id="wifi-form" onsubmit="saveWiFi(event)">
         <div class="group">
@@ -427,12 +439,9 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
         </div>
         <button type="submit" class="btn">Зберегти та підключити</button>
       </form>
-    </div>
-  </details>
-  
-  <details>
-    <summary>Вибір мелодії</summary>
-    <div class="spoiler-content">
+      
+      <div class="divider" style="margin: 20px 0;"></div>
+      
       <div class="group">
         <label>Мелодія тривоги</label>
         <select id="melody-select" onchange="setMelody(this.value)">
@@ -839,6 +848,28 @@ void buzzerTone(unsigned int frequency) {
 }
 
 void updateWaterBuzzer(bool waterPresent) {
+  // If preview is active, play the preview instead of the regular alarm
+  if (previewActive && buzzerEnabled) {
+    if (millis() - previewStartedAt >= 4000) {
+      buzzerOff();
+      previewActive = false;
+      return;
+    }
+    
+    // Play the preview melody in a loop with 0.2s pause
+    if (!previewMelodyPlayed) {
+      playCuteSound(previewMelodyIndex);
+      previewMelodyPlayed = true;
+      lastPreviewMelodyFinishedAt = millis();
+    } else {
+      buzzerOff();
+      if (millis() - lastPreviewMelodyFinishedAt >= 200) {
+        previewMelodyPlayed = false; // Trigger playing again
+      }
+    }
+    return;
+  }
+
   if (waterPresent) {
     buzzerOff();
     if (alarmMelodyPlayed) {
@@ -953,23 +984,6 @@ void serveConfigPage() {
   webServer.send(200, "text/html", html);
 }
 
-void playPreview(int melodyIdx) {
-  unsigned long start = millis();
-  while (millis() - start < 4000) {
-    playCuteSound(melodyIdx);
-    
-    // Pause between loops (0.2s pause)
-    unsigned long pauseStart = millis();
-    while (millis() - pauseStart < 200) {
-      updateSensorState();
-      updateWaterLed(stableWaterPresent);
-      webServer.handleClient(); // Keep processing web server clients
-      delay(10);
-    }
-  }
-  buzzerOff();
-}
-
 void handleSetMelody() {
   if (webServer.hasArg("val")) {
     int val = webServer.arg("val").toInt();
@@ -981,9 +995,15 @@ void handleSetMelody() {
     
     webServer.send(200, "text/plain", "OK");
     
-    // If a specific melody is selected (1-8), play a 4s preview loop
+    // If a specific melody is selected (1-8), trigger the 4s preview asynchronously
     if (melodyMode >= 1 && melodyMode <= 8) {
-      playPreview(melodyMode - 1);
+      previewMelodyIndex = melodyMode - 1;
+      previewStartedAt = millis();
+      previewActive = true;
+      previewMelodyPlayed = false; // Reset preview play flag
+    } else {
+      previewActive = false;
+      buzzerOff();
     }
   } else {
     webServer.send(400, "text/plain", "Bad Request");
