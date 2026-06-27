@@ -411,8 +411,27 @@ void queueTelegramMessage(TelegramMessage msg) {
 
 void telegramTask(void* parameter) {
   unsigned long lastUpdateCheckAt = 0;
+  bool wifiWasConnected = false;
 
   while (true) {
+    // 0. Handle Wi-Fi connection/reconnection update flushing
+    bool wifiConnectedNow = (WiFi.status() == WL_CONNECTED);
+    if (wifiConnectedNow && !wifiWasConnected) {
+      Serial.println("Wi-Fi connected/reconnected. Flushing pending Telegram updates...");
+      securedClient.stop();
+      securedClient.setInsecure();
+      int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+      while (numNewMessages > 0) {
+        bot.last_message_received = bot.messages[numNewMessages - 1].update_id;
+        securedClient.stop();
+        numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+      }
+      Serial.println("Updates flushed.");
+      wifiWasConnected = true;
+    } else if (!wifiConnectedNow) {
+      wifiWasConnected = false;
+    }
+
     // 1. Process pending notifications
     TelegramMessage msg = pendingTelegramMessage;
     if (msg != MSG_NONE) {
