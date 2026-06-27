@@ -537,12 +537,6 @@ void handleNotifications() {
   const unsigned long now = millis();
 
   if (!stableWaterPresent) {
-    // Delay sending Telegram alert by 2450ms (exactly after the double beep-beep alarm)
-    // to allow the buzzer sequence to finish and let the Wi-Fi connection stabilize.
-    if (waterMissingStartedAt != 0 && (now - waterMissingStartedAt < 2450)) {
-      return;
-    }
-
     const bool repeatAllowed = (lastEmptyNotificationAt == 0) || (now - lastEmptyNotificationAt >= TELEGRAM_MIN_REPEAT_MS);
     if (!lastNotifiedEmpty || repeatAllowed) {
       lastNotifiedEmpty = true;
