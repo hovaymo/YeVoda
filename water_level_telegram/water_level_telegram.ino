@@ -30,7 +30,8 @@ const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 const bool SENSOR_LOW_MEANS_WATER_PRESENT = true;
 
 // Timing
-const unsigned long SENSOR_DEBOUNCE_MS = 5000;
+const unsigned long SENSOR_DEBOUNCE_MS = 300;  // Quick 300ms debounce
+const unsigned long STATE_LOCKOUT_MS = 1500;   // Ignore rapid toggles within 1.5 seconds
 const unsigned long TELEGRAM_MIN_REPEAT_MS = 30UL * 60UL * 1000UL;
 const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
 const unsigned long LED_EMPTY_FADE_MS = 3000;
@@ -51,6 +52,7 @@ int lastPrintedPinState = -1;
 unsigned long rawChangedAt = 0;
 unsigned long lastEmptyNotificationAt = 0;
 unsigned long waterMissingStartedAt = 0;
+unsigned long lastStateChangeAt = 0;
 
 // FreeRTOS background Telegram task
 enum TelegramMessage {
@@ -562,7 +564,14 @@ void updateSensorState() {
   }
 
   if (now - rawChangedAt >= SENSOR_DEBOUNCE_MS) {
-    stableWaterPresent = currentRaw;
+    if (currentRaw != stableWaterPresent) {
+      if (lastStateChangeAt == 0 || (now - lastStateChangeAt >= STATE_LOCKOUT_MS)) {
+        stableWaterPresent = currentRaw;
+        lastStateChangeAt = now;
+        Serial.print("State changed to: ");
+        Serial.println(stableWaterPresent ? "WATER PRESENT" : "WATER EMPTY");
+      }
+    }
   }
 }
 
