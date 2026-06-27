@@ -59,7 +59,7 @@ enum TelegramMessage {
   MSG_BACK
 };
 volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
-SemaphoreHandle_t telegramMutex;
+
 
 // Subscriber management using ESP32 Preferences (up to 20 clients)
 Preferences preferences;
@@ -409,8 +409,11 @@ void queueTelegramMessage(TelegramMessage msg) {
   pendingTelegramMessage = msg;
 }
 
-void telegramNotificationTask(void* parameter) {
+void telegramTask(void* parameter) {
+  unsigned long lastUpdateCheckAt = 0;
+
   while (true) {
+    // 1. Process pending notifications
     TelegramMessage msg = pendingTelegramMessage;
     if (msg != MSG_NONE) {
       pendingTelegramMessage = MSG_NONE; // Clear it
@@ -433,23 +436,19 @@ void telegramNotificationTask(void* parameter) {
           Serial.print("Telegram notification sending: ");
           Serial.println(text);
           
+          securedClient.stop(); // Clean socket before request
+          securedClient.setInsecure();
+          
           bool success = false;
-          // Acquire mutex for thread-safe SSL socket usage
-          if (xSemaphoreTake(telegramMutex, portMAX_DELAY) == pdTRUE) {
-            securedClient.stop(); // Clean socket before request
-            securedClient.setInsecure();
-            
-            // Send only to active subscribers
-            for (int i = 0; i < userCount; i++) {
-              if (users[i].length() > 0 && wantsNotifications[i]) {
-                if (bot.sendMessage(users[i], text, "")) {
-                  success = true; // Mark as success if at least one succeeds
-                }
+          // Send only to active subscribers
+          for (int i = 0; i < userCount; i++) {
+            if (users[i].length() > 0 && wantsNotifications[i]) {
+              if (bot.sendMessage(users[i], text, "")) {
+                success = true;
               }
             }
-            securedClient.stop();
-            xSemaphoreGive(telegramMutex);
           }
+          securedClient.stop();
           
           if (success) {
             Serial.println("Telegram notification SUCCESS");
@@ -462,70 +461,55 @@ void telegramNotificationTask(void* parameter) {
         }
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(50)); // Check queue every 50ms
-  }
-}
 
-void telegramPollingTask(void* parameter) {
-  unsigned long lastUpdateCheckAt = 0;
-
-  while (true) {
+    // 2. Poll for incoming messages (every 1.5 seconds)
     const unsigned long now = millis();
     if (WiFi.status() == WL_CONNECTED && (now - lastUpdateCheckAt >= 1500)) {
       lastUpdateCheckAt = now;
 
-      int numNewMessages = 0;
+      securedClient.stop(); // Clean socket before request
+      securedClient.setInsecure();
+      int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
 
-      // Acquire mutex for thread-safe SSL socket usage
-      if (xSemaphoreTake(telegramMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-        securedClient.stop(); // Clean socket before request
-        securedClient.setInsecure();
-        numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-
-        if (numNewMessages == 0) {
-          securedClient.stop();
-          xSemaphoreGive(telegramMutex);
-        } else {
-          // Process messages while holding the mutex
-          for (int i = 0; i < numNewMessages; i++) {
-            if (bot.messages[i].update_id > bot.last_message_received) {
-              bot.last_message_received = bot.messages[i].update_id;
-            }
-
-            String chatId = String(bot.messages[i].chat_id);
-            if (chatId.startsWith("-")) {
-              continue; // Ignore group chats, supergroups, and channels entirely
-            }
-            String text = bot.messages[i].text;
-
-            if (text == "/start") {
-              registerUser(chatId);
-              sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
-            } 
-            else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
-              setNotificationPreference(chatId, true);
-              sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
-            }
-            else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
-              setNotificationPreference(chatId, false);
-              sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
-            }
-            else if (text == "Є вода?" || text == "/status") {
-              String reply = "";
-              if (stableWaterPresent) {
-                reply = "Так, вода є. 🟢";
-              } else {
-                reply = "Ні, вода закінчилась! 🔴";
-              }
-              securedClient.stop();
-              bot.sendMessage(chatId, reply, "");
-            }
+      if (numNewMessages > 0) {
+        for (int i = 0; i < numNewMessages; i++) {
+          if (bot.messages[i].update_id > bot.last_message_received) {
+            bot.last_message_received = bot.messages[i].update_id;
           }
-          securedClient.stop();
-          xSemaphoreGive(telegramMutex);
+
+          String chatId = String(bot.messages[i].chat_id);
+          if (chatId.startsWith("-")) {
+            continue; // Ignore group chats, supergroups, and channels entirely
+          }
+          String text = bot.messages[i].text;
+
+          if (text == "/start") {
+            registerUser(chatId);
+            sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
+          } 
+          else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
+            setNotificationPreference(chatId, true);
+            sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
+          }
+          else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
+            setNotificationPreference(chatId, false);
+            sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
+          }
+          else if (text == "Є вода?" || text == "/status") {
+            String reply = "";
+            if (stableWaterPresent) {
+              reply = "Так, вода є. 🟢";
+            } else {
+              reply = "Ні, вода закінчилась! 🔴";
+            }
+            securedClient.stop();
+            bot.sendMessage(chatId, reply, "");
+          }
         }
+        securedClient.stop(); // Clean socket after processing
       }
     }
+
     vTaskDelay(pdMS_TO_TICKS(100)); // Poll loop every 100ms
   }
 }
@@ -609,21 +593,9 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.println("Connecting to WiFi...");
 
-  telegramMutex = xSemaphoreCreateMutex();
-
   xTaskCreatePinnedToCore(
-    telegramNotificationTask,
-    "TelegramNotify",
-    8192,
-    NULL,
-    1,
-    NULL,
-    0
-  );
-
-  xTaskCreatePinnedToCore(
-    telegramPollingTask,
-    "TelegramPoll",
+    telegramTask,
+    "TelegramTask",
     8192,
     NULL,
     1,
