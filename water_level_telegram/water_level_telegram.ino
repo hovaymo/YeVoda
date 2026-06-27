@@ -150,9 +150,36 @@ void sendMainMenu(const String& chatId, const String& welcomeText) {
   } else {
     keyboardJson = "[[\"Є вода?\"],[\"Підписатись на сповіщення 🔔\"]]";
   }
+
+  // Build JSON payload manually to support disable_notification
+  String payload = "{\"chat_id\":\"" + chatId + "\",";
+  payload += "\"text\":\"" + welcomeText + "\",";
+  payload += "\"disable_notification\":true,";
+  payload += "\"reply_markup\":{";
+  payload += "\"keyboard\":" + keyboardJson + ",";
+  payload += "\"resize_keyboard\":true,";
+  payload += "\"one_time_keyboard\":false";
+  payload += "}}";
+
   securedClient.stop();
   securedClient.setInsecure();
-  bot.sendMessageWithReplyKeyboard(chatId, welcomeText, "", keyboardJson, true);
+  
+  if (securedClient.connect("api.telegram.org", 443)) {
+    String url = "/bot" + String(BOT_TOKEN) + "/sendMessage";
+    securedClient.print("POST " + url + " HTTP/1.1\r\n");
+    securedClient.print("Host: api.telegram.org\r\n");
+    securedClient.print("Content-Type: application/json\r\n");
+    securedClient.print("Content-Length: " + String(payload.length()) + "\r\n");
+    securedClient.print("Connection: close\r\n\r\n");
+    securedClient.print(payload);
+    
+    // Read response briefly to clear buffer
+    while (securedClient.connected()) {
+      String line = securedClient.readStringUntil('\n');
+      if (line == "\r") break;
+    }
+  }
+  securedClient.stop();
 }
 
 uint32_t colorGreen() {
