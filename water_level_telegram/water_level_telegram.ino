@@ -39,6 +39,12 @@ const unsigned long LED_EMPTY_FADE_MS = 5000;
 const unsigned long LED_RED_SOLID_MS = 2000;
 const unsigned long LED_RED_BLINK_MS = 250;
 
+extern bool stableWaterPresent;
+class WebServer;
+extern WebServer webServer;
+void updateSensorState();
+void updateWaterLed(bool waterPresent);
+
 enum TelegramMessage {
   MSG_NONE,
   MSG_EMPTY,
