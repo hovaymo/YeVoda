@@ -64,64 +64,100 @@ unsigned long lastMelodyFinishedAt = 0;
 #define CUTE_NOTE_G5  784
 #define CUTE_NOTE_A5  880
 
-void _cuteTone(float noteFrequency, long noteDuration, int silentDuration) {
-  if (silentDuration == 0) { silentDuration = 1; }
-  tone(BUZZER_PIN, (unsigned int)noteFrequency);
-  delay(noteDuration);
-  noTone(BUZZER_PIN);
-  delay(silentDuration);
+bool delayBuzzerLoop(unsigned long duration) {
+  unsigned long start = millis();
+  while (millis() - start < duration) {
+    updateSensorState();
+    updateWaterLed(stableWaterPresent);
+    webServer.handleClient(); // Keep the web server fully responsive!
+    
+    if (stableWaterPresent) {
+      noTone(BUZZER_PIN);
+      return false; // Abort
+    }
+    delay(10);
+  }
+  return true; // Completed
 }
 
-void cuteBendTones(float initFrequency, float finalFrequency, float prop, long noteDuration, int silentDuration) {
+bool _cuteTone(float noteFrequency, long noteDuration, int silentDuration) {
+  updateSensorState();
+  if (stableWaterPresent) {
+    noTone(BUZZER_PIN);
+    return false;
+  }
+  
   if (silentDuration == 0) { silentDuration = 1; }
+  tone(BUZZER_PIN, (unsigned int)noteFrequency);
+  
+  if (!delayBuzzerLoop(noteDuration)) {
+    return false;
+  }
+  noTone(BUZZER_PIN);
+  
+  return delayBuzzerLoop(silentDuration);
+}
+
+bool cuteBendTones(float initFrequency, float finalFrequency, float prop, long noteDuration, int silentDuration) {
   if (initFrequency < finalFrequency) {
     for (float i = initFrequency; i < finalFrequency; i = i * prop) {
-      _cuteTone(i, noteDuration, silentDuration);
+      if (!_cuteTone(i, noteDuration, silentDuration)) return false;
     }
   } else {
     for (float i = initFrequency; i > finalFrequency; i = i / prop) {
-      _cuteTone(i, noteDuration, silentDuration);
+      if (!_cuteTone(i, noteDuration, silentDuration)) return false;
     }
   }
+  return true;
 }
 
 void playCuteSound(int soundName) {
   switch(soundName) {
     case 0: // S_HAPPY
-      cuteBendTones(1500, 2500, 1.05, 20, 8);
-      cuteBendTones(2499, 1500, 1.05, 25, 8);
+      if (cuteBendTones(1500, 2500, 1.05, 20, 8)) {
+        cuteBendTones(2499, 1500, 1.05, 25, 8);
+      }
       break;
     case 1: // S_CUDDLY
-      cuteBendTones(700, 900, 1.03, 16, 4);
-      cuteBendTones(899, 650, 1.01, 18, 7);
+      if (cuteBendTones(700, 900, 1.03, 16, 4)) {
+        cuteBendTones(899, 650, 1.01, 18, 7);
+      }
       break;
     case 2: // S_SUPER_HAPPY
-      cuteBendTones(2000, 6000, 1.05, 8, 3);
-      delay(50);
-      cuteBendTones(5999, 2000, 1.05, 13, 2);
+      if (cuteBendTones(2000, 6000, 1.05, 8, 3)) {
+        if (delayBuzzerLoop(50)) {
+          cuteBendTones(5999, 2000, 1.05, 13, 2);
+        }
+      }
       break;
     case 3: // S_OHOOH
-      cuteBendTones(880, 2000, 1.04, 8, 3);
-      delay(200);
-      for (float i = 880; i < 2000; i = i * 1.04) {
-        _cuteTone(CUTE_NOTE_B5, 5, 10);
+      if (cuteBendTones(880, 2000, 1.04, 8, 3)) {
+        if (delayBuzzerLoop(200)) {
+          for (float i = 880; i < 2000; i = i * 1.04) {
+            if (!_cuteTone(CUTE_NOTE_B5, 5, 10)) return;
+          }
+        }
       }
       break;
     case 4: // S_SURPRISE
-      cuteBendTones(800, 2150, 1.02, 10, 1);
-      cuteBendTones(2149, 800, 1.03, 7, 1);
+      if (cuteBendTones(800, 2150, 1.02, 10, 1)) {
+        cuteBendTones(2149, 800, 1.03, 7, 1);
+      }
       break;
     case 5: // S_CONNECTION
-      _cuteTone(CUTE_NOTE_E5, 50, 30);
-      _cuteTone(CUTE_NOTE_E6, 55, 25);
-      _cuteTone(CUTE_NOTE_A6, 60, 10);
+      if (_cuteTone(CUTE_NOTE_E5, 50, 30)) {
+        if (_cuteTone(CUTE_NOTE_E6, 55, 25)) {
+          _cuteTone(CUTE_NOTE_A6, 60, 10);
+        }
+      }
       break;
     case 6: // S_MODE1
       cuteBendTones(CUTE_NOTE_E6, CUTE_NOTE_A6, 1.02, 30, 10);
       break;
     case 7: // S_JUMP
-      cuteBendTones(880, 2000, 1.04, 8, 3);
-      delay(200);
+      if (cuteBendTones(880, 2000, 1.04, 8, 3)) {
+        delayBuzzerLoop(200);
+      }
       break;
   }
 }
