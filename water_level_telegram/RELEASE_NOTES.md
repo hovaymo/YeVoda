@@ -2,19 +2,21 @@
 
 ## [v1.1] - 2026-06-28
 ### Added
-- **Westminster Chime Melody**: Replaced the harsh beeper tone with the classic, melodic Westminster door chime (Big Ben melody).
-- **Synchronized LED & Web-Dot Pulsing**: Both the physical NeoPixel LED and the web status emoji `🔴` pulse in perfect real-time synchronization with the chime notes.
+- **Robotic Alarm Melodies**: Ported Everton Ramires' `CuteBuzzerSounds` player logic (containing `S_HAPPY`, `S_CUDDLY`, `S_SUPER_HAPPY`, etc.) directly into the sketch to cycle sounds on consecutive triggers.
+- **Melody Looping**: Melodies loop continuously during empty tank alarms with a quick 0.2s pause.
 - **Smooth Opacity Blinking**: Replaced blocky character swapping (`🔴` / `⚫`) with smooth CSS opacity transitions (`1.0` ↔ `0.15`) at a 50ms polling loop, creating a premium light pulse effect.
 - **White Wi-Fi Icons & Shifted Layout**: Status icons are styled white (`#ffffff`) and shifted 15px left relative to the status text for a cleaner header layout.
 
 ### Changed
-- **Empty State Timing**: The indicator switches immediately to solid red `🔴` for exactly 5 seconds upon water loss, before entering the Westminster blinking/buzzing phase.
+- **Credentials Security**: Private Wi-Fi credentials and Telegram Bot Token replaced with generic placeholders to prevent repository exposure.
+- **Empty State Timing**: The indicator switches immediately to solid red `🔴` for exactly 5 seconds upon water loss, before entering the melody loop phase.
 - **Client-Side Rendering Delegation**: Moved all fading, timing, and blinking logic to local client-side JavaScript, leaving the ESP32 to only serve raw data. This significantly reduces CPU and network overhead.
 - **Subscriber Bypass**: The Telegram notification queue completely shuts down when there are no active subscribers, eliminating unnecessary secure socket negotiations and Serial log spam.
+- **Driver Optimizations**: Swapped low-level ESP32 PWM `ledcWrite` calls for standard `tone()`/`noTone()` calls, preventing driver channel conflicts with playCuteSound.
 
 ### Fixed
 - **Arduino Compilation Scopes**: Moved the `TelegramMessage` enum definition to the top of the C++ file, resolving IDE auto-generated prototype compilation errors.
-- **Cleaned Up Constants**: Removed deprecated buzzer frequency and period constants.
+- **Arduino Core v3.0 Compatibility**: Ported `CuteBuzzerSounds` logic directly, resolving legacy `ledcSetup` compilation errors on ESP32 Arduino Core v3.x.
 
 ---
 

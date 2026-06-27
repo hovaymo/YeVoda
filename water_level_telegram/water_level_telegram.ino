@@ -16,15 +16,13 @@ const uint8_t BUZZER_RESOLUTION = 8;
 const uint8_t BUZZER_DUTY = 128;
 const unsigned int BUZZER_ALARM_LOW_HZ = 2600;
 const unsigned int BUZZER_ALARM_HIGH_HZ = 4300;
-const unsigned long BUZZER_ALARM_PERIOD_MS = 500;
-const unsigned long BUZZER_ALARM_ON_MS = 250;
 
-// Fallback Wi-Fi
-const char* DEFAULT_WIFI_SSID = "TP-LINK_C070-";
-const char* DEFAULT_WIFI_PASSWORD = "98337606";
+// Fallback Wi-Fi (leave empty or set your own credentials here)
+const char* DEFAULT_WIFI_SSID = "Your_WiFi_SSID";
+const char* DEFAULT_WIFI_PASSWORD = "Your_WiFi_Password";
 
-// Telegram
-const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
+// Telegram Bot configuration
+const char* BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN";
 
 
 
@@ -40,6 +38,93 @@ const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
 const unsigned long LED_EMPTY_FADE_MS = 5000;
 const unsigned long LED_RED_SOLID_MS = 2000;
 const unsigned long LED_RED_BLINK_MS = 250;
+
+enum TelegramMessage {
+  MSG_NONE,
+  MSG_EMPTY,
+  MSG_BACK
+};
+volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
+
+// Pre-defined robotic melodies array to cycle through (indexes 0 to 7)
+const int CUTE_MELODIES_COUNT = 8;
+int currentMelodyIndex = 0;
+bool alarmMelodyPlayed = false;
+unsigned long lastMelodyFinishedAt = 0;
+
+// Note frequencies for robot sounds
+#define CUTE_NOTE_E5  659
+#define CUTE_NOTE_E6  1319
+#define CUTE_NOTE_A6  1760
+#define CUTE_NOTE_G6  1568
+#define CUTE_NOTE_D7  2349
+#define CUTE_NOTE_B5  988
+#define CUTE_NOTE_C6  1047
+#define CUTE_NOTE_D5  587
+#define CUTE_NOTE_G5  784
+#define CUTE_NOTE_A5  880
+
+void _cuteTone(float noteFrequency, long noteDuration, int silentDuration) {
+  if (silentDuration == 0) { silentDuration = 1; }
+  tone(BUZZER_PIN, (unsigned int)noteFrequency);
+  delay(noteDuration);
+  noTone(BUZZER_PIN);
+  delay(silentDuration);
+}
+
+void cuteBendTones(float initFrequency, float finalFrequency, float prop, long noteDuration, int silentDuration) {
+  if (silentDuration == 0) { silentDuration = 1; }
+  if (initFrequency < finalFrequency) {
+    for (float i = initFrequency; i < finalFrequency; i = i * prop) {
+      _cuteTone(i, noteDuration, silentDuration);
+    }
+  } else {
+    for (float i = initFrequency; i > finalFrequency; i = i / prop) {
+      _cuteTone(i, noteDuration, silentDuration);
+    }
+  }
+}
+
+void playCuteSound(int soundName) {
+  switch(soundName) {
+    case 0: // S_HAPPY
+      cuteBendTones(1500, 2500, 1.05, 20, 8);
+      cuteBendTones(2499, 1500, 1.05, 25, 8);
+      break;
+    case 1: // S_CUDDLY
+      cuteBendTones(700, 900, 1.03, 16, 4);
+      cuteBendTones(899, 650, 1.01, 18, 7);
+      break;
+    case 2: // S_SUPER_HAPPY
+      cuteBendTones(2000, 6000, 1.05, 8, 3);
+      delay(50);
+      cuteBendTones(5999, 2000, 1.05, 13, 2);
+      break;
+    case 3: // S_OHOOH
+      cuteBendTones(880, 2000, 1.04, 8, 3);
+      delay(200);
+      for (float i = 880; i < 2000; i = i * 1.04) {
+        _cuteTone(CUTE_NOTE_B5, 5, 10);
+      }
+      break;
+    case 4: // S_SURPRISE
+      cuteBendTones(800, 2150, 1.02, 10, 1);
+      cuteBendTones(2149, 800, 1.03, 7, 1);
+      break;
+    case 5: // S_CONNECTION
+      _cuteTone(CUTE_NOTE_E5, 50, 30);
+      _cuteTone(CUTE_NOTE_E6, 55, 25);
+      _cuteTone(CUTE_NOTE_A6, 60, 10);
+      break;
+    case 6: // S_MODE1
+      cuteBendTones(CUTE_NOTE_E6, CUTE_NOTE_A6, 1.02, 30, 10);
+      break;
+    case 7: // S_JUMP
+      cuteBendTones(880, 2000, 1.04, 8, 3);
+      delay(200);
+      break;
+  }
+}
 
 Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRBW + NEO_KHZ800);
 WiFiClientSecure securedClient;
@@ -424,15 +509,6 @@ unsigned long lastEmptyNotificationAt = 0;
 unsigned long waterMissingStartedAt = 0;
 unsigned long lastStateChangeAt = 0;
 
-// FreeRTOS background Telegram task
-enum TelegramMessage {
-  MSG_NONE,
-  MSG_EMPTY,
-  MSG_BACK
-};
-volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
-
-
 // Subscriber management using ESP32 Preferences (up to 20 clients)
 Preferences preferences;
 const int MAX_USERS = 20;
@@ -611,9 +687,7 @@ uint32_t colorOff() {
   return led.Color(0, 0, 0, 0);
 }
 
-bool isFinalAlarmToneOn(unsigned long alarmFor) {
-  return alarmFor % BUZZER_ALARM_PERIOD_MS < BUZZER_ALARM_ON_MS;
-}
+
 
 void setLed(uint32_t color) {
   if (!ledEnabled) {
@@ -654,9 +728,12 @@ void updateWaterLed(bool waterPresent) {
     return;
   }
 
-  // After 3 seconds, blink red synchronized with buzzer alarm period
+  // After 5 seconds, blink red at 0.5s rate (500ms period, 250ms ON, 250ms OFF)
+  // Note: if the buzzer is playing a blocking melody, this will stay solid red
+  // until the melody finishes, then begin blinking.
   const unsigned long blinkFor = missingFor - LED_EMPTY_FADE_MS;
-  if (isFinalAlarmToneOn(blinkFor)) {
+  const unsigned long phase = blinkFor % 500;
+  if (phase < 250) {
     setLed(colorRed());
   } else {
     setLed(colorOff());
@@ -664,16 +741,25 @@ void updateWaterLed(bool waterPresent) {
 }
 
 void buzzerOff() {
-  ledcWrite(BUZZER_PIN, 0);
+  noTone(BUZZER_PIN);
 }
 
 void buzzerTone(unsigned int frequency) {
-  ledcWriteTone(BUZZER_PIN, frequency);
-  ledcWrite(BUZZER_PIN, BUZZER_DUTY);
+  tone(BUZZER_PIN, frequency);
 }
 
 void updateWaterBuzzer(bool waterPresent) {
-  if (!buzzerEnabled || waterPresent || waterMissingStartedAt == 0) {
+  if (waterPresent) {
+    buzzerOff();
+    if (alarmMelodyPlayed) {
+      // Only increment the index if the alarm actually went off (played at least once)
+      currentMelodyIndex = (currentMelodyIndex + 1) % CUTE_MELODIES_COUNT;
+      alarmMelodyPlayed = false;
+    }
+    return;
+  }
+
+  if (!buzzerEnabled || waterMissingStartedAt == 0) {
     buzzerOff();
     return;
   }
@@ -688,8 +774,6 @@ void updateWaterBuzzer(bool waterPresent) {
   }
 
   // Beep-beep after 2 seconds:
-  // First beep: 2000 - 2150 ms
-  // Second beep: 2300 - 2450 ms
   if (missingFor >= 2000 && missingFor < 2150) {
     buzzerTone(3000);
     return;
@@ -699,29 +783,21 @@ void updateWaterBuzzer(bool waterPresent) {
     return;
   }
 
-  const unsigned long alarmStartAt = LED_EMPTY_HOLD_GREEN_MS + LED_EMPTY_FADE_MS + LED_RED_SOLID_MS;
-  if (missingFor < alarmStartAt) {
+  if (missingFor < LED_EMPTY_FADE_MS) {
     buzzerOff();
     return;
   }
 
-  const unsigned long alarmFor = missingFor - alarmStartAt;
-  const unsigned long phase = alarmFor % BUZZER_ALARM_PERIOD_MS;
-
-  if (phase >= BUZZER_ALARM_ON_MS) {
-    buzzerOff();
-    return;
-  }
-
-  const float pulseProgress = (float)phase / (float)BUZZER_ALARM_ON_MS;
-  const unsigned int sweepHz = BUZZER_ALARM_LOW_HZ + (unsigned int)(pulseProgress * (BUZZER_ALARM_HIGH_HZ - BUZZER_ALARM_LOW_HZ));
-
-  if (phase < 70) {
-    buzzerTone(BUZZER_ALARM_HIGH_HZ);
-  } else if (phase < 135) {
-    buzzerTone(BUZZER_ALARM_LOW_HZ);
+  // After 5 seconds, play the current melody in a loop with a 4-second pause
+  if (!alarmMelodyPlayed) {
+    playCuteSound(currentMelodyIndex);
+    alarmMelodyPlayed = true;
+    lastMelodyFinishedAt = millis();
   } else {
-    buzzerTone(sweepHz);
+    buzzerOff();
+    if (millis() - lastMelodyFinishedAt >= 200) { // 0.2 seconds of silence between repeats
+      alarmMelodyPlayed = false; // Trigger playing again
+    }
   }
 }
 
@@ -1116,7 +1192,7 @@ void setup() {
   loadSubscribers();
 
   // Initialize Buzzer
-  ledcAttach(BUZZER_PIN, 2000, BUZZER_RESOLUTION);
+  pinMode(BUZZER_PIN, OUTPUT);
   buzzerOff();
 
   // Initialize Onboard NeoPixel
