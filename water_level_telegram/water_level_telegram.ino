@@ -3,6 +3,9 @@
 #include <UniversalTelegramBot.h>
 #include <Adafruit_NeoPixel.h>
 #include <Preferences.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <ESPmDNS.h>
 
 // Pins
 const uint8_t WATER_SENSOR_PIN = 4;  // Yellow OUT from XKC-Y25-NPN
@@ -13,12 +16,12 @@ const uint8_t BUZZER_RESOLUTION = 8;
 const uint8_t BUZZER_DUTY = 128;
 const unsigned int BUZZER_ALARM_LOW_HZ = 2600;
 const unsigned int BUZZER_ALARM_HIGH_HZ = 4300;
-const unsigned long BUZZER_ALARM_PERIOD_MS = 300;
-const unsigned long BUZZER_ALARM_ON_MS = 210;
+const unsigned long BUZZER_ALARM_PERIOD_MS = 500;
+const unsigned long BUZZER_ALARM_ON_MS = 250;
 
-// Wi-Fi
-const char* WIFI_SSID = "TP-LINK_C070";
-const char* WIFI_PASSWORD = "98337606";
+// Fallback Wi-Fi
+const char* DEFAULT_WIFI_SSID = "TP-LINK_C070-";
+const char* DEFAULT_WIFI_PASSWORD = "98337606";
 
 // Telegram
 const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
@@ -34,13 +37,380 @@ const unsigned long SENSOR_DEBOUNCE_MS = 300;  // Quick 300ms debounce
 const unsigned long STATE_LOCKOUT_MS = 1500;   // Ignore rapid toggles within 1.5 seconds
 const unsigned long TELEGRAM_MIN_REPEAT_MS = 30UL * 60UL * 1000UL;
 const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
-const unsigned long LED_EMPTY_FADE_MS = 3000;
+const unsigned long LED_EMPTY_FADE_MS = 5000;
 const unsigned long LED_RED_SOLID_MS = 2000;
-const unsigned long LED_RED_BLINK_MS = 450;
+const unsigned long LED_RED_BLINK_MS = 250;
 
 Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRBW + NEO_KHZ800);
 WiFiClientSecure securedClient;
 UniversalTelegramBot bot(BOT_TOKEN, securedClient);
+
+// Wi-Fi Config
+String wifiSsid = "";
+String wifiPassword = "";
+bool ledEnabled = true;
+bool buzzerEnabled = true;
+
+bool apModeActive = false;
+bool wifiConnecting = true;
+bool wifiConnectionFailed = false;
+unsigned long wifiConnectionStartedAt = 0;
+unsigned long wifiConnectedAt = 0;
+
+WebServer webServer(80);
+DNSServer dnsServer;
+
+// BoxBox styled webpage html
+const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YeVoda Config</title>
+<style>
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #1a1a22;
+    color: #cbd5e1;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding-top: 30px;
+    box-sizing: border-box;
+  }
+  .content {
+    width: 320px;
+    text-align: center;
+    padding: 10px;
+  }
+  .header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 25px;
+  }
+  .logo-title {
+    font-weight: 700;
+    color: #38bdf8;
+    font-size: 24px;
+    letter-spacing: -0.02em;
+  }
+  .header-right {
+    display: flex;
+    align-items: center;
+  }
+  #wifi-icon {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 15px;
+  }
+  #wifi-status {
+    font-size: 16px;
+    font-weight: 600;
+    color: #cbd5e1;
+  }
+  details {
+    margin-bottom: 20px;
+    text-align: left;
+  }
+  summary {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    background-color: #17171f;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: 6px;
+    cursor: pointer;
+    outline: none;
+    user-select: none;
+    transition: border-color 0.2s;
+  }
+  summary:hover {
+    border-color: #f59e0b;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary::after {
+    content: "▼";
+    font-size: 10px;
+    color: #f59e0b;
+    transition: transform 0.2s;
+  }
+  details[open] summary::after {
+    transform: rotate(180deg);
+  }
+  .spoiler-content {
+    padding: 15px 5px 5px 5px;
+  }
+  .group {
+    margin-bottom: 20px;
+    text-align: left;
+  }
+  label {
+    display: block;
+    font-size: 13px;
+    color: #f59e0b;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+  }
+  input[type="text"], input[type="password"] {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 10px;
+    border: 1px solid #334155;
+    background-color: #17171f;
+    color: #f8fafc;
+    border-radius: 6px;
+    font-size: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  input:focus {
+    border-color: #f59e0b;
+    box-shadow: none;
+  }
+  .btn {
+    width: 100%;
+    padding: 14px;
+    background-color: #f59e0b;
+    border: none;
+    color: #171722;
+    font-weight: 700;
+    border-radius: 6px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s, transform 0.1s;
+  }
+  .btn:hover {
+    background-color: #d97706;
+  }
+  .btn:active {
+    transform: scale(0.98);
+  }
+  .divider {
+    height: 1px;
+    background-color: #2d2d3a;
+    margin: 20px 0;
+  }
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+  }
+  .toggle-label {
+    font-size: 16px;
+    color: #e2e8f0;
+  }
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 28px;
+  }
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #475569;
+    transition: .3s;
+    border-radius: 24px;
+  }
+  .slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+  }
+  input:checked + .slider {
+    background-color: #f59e0b;
+  }
+  input:checked + .slider:before {
+    transform: translateX(22px);
+  }
+</style>
+</head>
+<body>
+<div class="content">
+  <div class="header-row">
+    <span class="logo-title">YeVoda</span>
+    <div class="header-right">
+      <span id="wifi-icon">%WIFI_ICON%</span>
+      <span id="wifi-status">%WIFI_STATUS%</span>
+    </div>
+  </div>
+  
+  <details %SPOILER_STATE%>
+    <summary>Налаштування Wi-Fi</summary>
+    <div class="spoiler-content">
+      <form id="wifi-form" onsubmit="saveWiFi(event)">
+        <div class="group">
+          <label>Wi-Fi Мережа</label>
+          <input type="text" name="ssid" id="ssid-input" value="%SSID%" required placeholder="Введіть назву">
+        </div>
+        <div class="group">
+          <label>Пароль</label>
+          <div style="position: relative;">
+            <input type="password" name="pass" id="pass-input" value="%PASS%" placeholder="Введіть пароль" style="padding-right: 85px;">
+            <span id="toggle-eye" onclick="togglePassView()" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #f59e0b; font-size: 12px; font-weight: bold; user-select: none; text-transform: uppercase;">Показати</span>
+          </div>
+        </div>
+        <button type="submit" class="btn">Зберегти та підключити</button>
+      </form>
+    </div>
+  </details>
+  
+  <div class="divider"></div>
+  
+  <div class="toggle-row">
+    <span class="toggle-label">Світлодіод 💡</span>
+    <label class="switch" onclick="event.stopPropagation();">
+      <input type="checkbox" id="led-chk" %LED_CHECKED% onchange="toggle('led')">
+      <span class="slider"></span>
+    </label>
+  </div>
+  
+  <div class="toggle-row">
+    <span class="toggle-label">Звук бузера 🔊</span>
+    <label class="switch" onclick="event.stopPropagation();">
+      <input type="checkbox" id="buz-chk" %BUZ_CHECKED% onchange="toggle('buz')">
+      <span class="slider"></span>
+    </label>
+  </div>
+</div>
+
+<script>
+  // White SVGs
+  var wifiOn = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="3"></line></svg>`;
+  var wifiOff = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle;"><line x1="1" y1="1" x2="23" y2="23"></line><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"></path><path d="M5 12.55a10.94 10.94 0 0 1 5.83-2.84"></path><path d="M1.42 9a16 16 0 0 1 12.58-4.7"></path><path d="M20 7.24a15.7 15.7 0 0 1 2.58 1.76"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="3"></line></svg>`;
+
+  let waterPresent = true;
+  let elapsedMs = 0;
+  let lastUpdateAt = Date.now();
+  let currentEmoji = "";
+  let currentOpacity = "";
+
+  function saveWiFi(event) {
+    event.preventDefault();
+    var ssid = document.getElementById('ssid-input').value;
+    var pass = document.getElementById('pass-input').value;
+    var params = 'ssid=' + encodeURIComponent(ssid) + '&pass=' + encodeURIComponent(pass);
+    
+    fetch('/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: params
+    });
+    document.querySelectorAll('input[type="text"], input[type="password"]').forEach(el => el.blur());
+  }
+
+  function toggle(type) {
+    var chk = document.getElementById(type + '-chk').checked;
+    fetch('/toggle?type=' + type + '&val=' + (chk ? '1' : '0'));
+    // Force keyboard dismiss and prevent focus shifting
+    document.querySelectorAll('input[type="text"], input[type="password"]').forEach(el => el.blur());
+  }
+
+  function togglePassView() {
+    var input = document.getElementById('pass-input');
+    var btn = document.getElementById('toggle-eye');
+    if (input.type === 'password') {
+      input.type = 'text';
+      btn.innerText = 'Приховати';
+    } else {
+      input.type = 'password';
+      btn.innerText = 'Показати';
+    }
+  }
+
+  function getStatusEmoji(water, elapsed) {
+    if (water) {
+      return { emoji: "🟢", opacity: "1" };
+    }
+    const solidRedTime = 5000; // 5 seconds solid red
+    
+    if (elapsed < solidRedTime) {
+      return { emoji: "🔴", opacity: "1" };
+    }
+    
+    // Blinking phase (500ms cycle, 250ms ON, 250ms OFF)
+    const alarmFor = elapsed - solidRedTime;
+    const phase = alarmFor % 500;
+    const opacity = (phase < 250) ? "1" : "0.15";
+    return { emoji: "🔴", opacity: opacity };
+  }
+
+  function updateLocalState() {
+    const now = Date.now();
+    const dt = now - lastUpdateAt;
+    lastUpdateAt = now;
+    
+    if (!waterPresent) {
+      elapsedMs += dt;
+    } else {
+      elapsedMs = 0;
+    }
+    
+    const res = getStatusEmoji(waterPresent, elapsedMs);
+    
+    var emojiEl = document.getElementById('water-emoji');
+    if (emojiEl) {
+      if (currentEmoji !== res.emoji) {
+        currentEmoji = res.emoji;
+        emojiEl.innerText = res.emoji;
+      }
+      if (currentOpacity !== res.opacity) {
+        currentOpacity = res.opacity;
+        emojiEl.style.opacity = res.opacity;
+      }
+    }
+  }
+
+  function fetchStatus() {
+    fetch('/status_json')
+      .then(response => response.json())
+      .then(data => {
+        document.getElementById('wifi-icon').innerHTML = data.connected ? wifiOn : wifiOff;
+        document.getElementById('led-chk').checked = data.led;
+        document.getElementById('buz-chk').checked = data.buz;
+        
+        waterPresent = data.water;
+        elapsedMs = data.elapsed;
+        lastUpdateAt = Date.now();
+      })
+      .catch(err => console.error(err));
+  }
+
+  // Poll server status every 1.5 seconds
+  setInterval(fetchStatus, 1500);
+  // High-frequency render loop (50ms) for smooth blinking and transitions locally
+  setInterval(updateLocalState, 50);
+</script>
+</body>
+</html>
+)rawliteral";
 
 // States
 bool rawWaterPresent = false;
@@ -246,7 +616,11 @@ bool isFinalAlarmToneOn(unsigned long alarmFor) {
 }
 
 void setLed(uint32_t color) {
-  led.setPixelColor(0, color);
+  if (!ledEnabled) {
+    led.setPixelColor(0, colorOff());
+  } else {
+    led.setPixelColor(0, color);
+  }
   led.show();
 }
 
@@ -274,31 +648,18 @@ void updateWaterLed(bool waterPresent) {
   }
 
   const unsigned long missingFor = now - waterMissingStartedAt;
-  if (missingFor < LED_EMPTY_HOLD_GREEN_MS) {
-    setLed(colorGreen());
+  
+  if (missingFor < LED_EMPTY_FADE_MS) {
+    setLed(colorRed());
     return;
   }
 
-  const unsigned long fadeFor = missingFor - LED_EMPTY_HOLD_GREEN_MS;
-  if (fadeFor >= LED_EMPTY_FADE_MS) {
-    const unsigned long redFor = fadeFor - LED_EMPTY_FADE_MS;
-    if (redFor < LED_RED_SOLID_MS) {
-      setLed(colorRed());
-    } else if (isFinalAlarmToneOn(redFor - LED_RED_SOLID_MS)) {
-      setLed(colorRed());
-    } else {
-      setLed(colorOff());
-    }
-    return;
-  }
-
-  const float progress = (float)fadeFor / (float)LED_EMPTY_FADE_MS;
-  if (progress < 0.5f) {
-    setLed(blendColor(0, 80, 0, 0, 110, 80, 0, 10, progress / 0.5f));
-  } else if (progress < 0.75f) {
-    setLed(blendColor(110, 80, 0, 10, 140, 35, 0, 0, (progress - 0.5f) / 0.25f));
+  // After 3 seconds, blink red synchronized with buzzer alarm period
+  const unsigned long blinkFor = missingFor - LED_EMPTY_FADE_MS;
+  if (isFinalAlarmToneOn(blinkFor)) {
+    setLed(colorRed());
   } else {
-    setLed(blendColor(140, 35, 0, 0, 160, 0, 0, 0, (progress - 0.75f) / 0.25f));
+    setLed(colorOff());
   }
 }
 
@@ -312,7 +673,7 @@ void buzzerTone(unsigned int frequency) {
 }
 
 void updateWaterBuzzer(bool waterPresent) {
-  if (waterPresent || waterMissingStartedAt == 0) {
+  if (!buzzerEnabled || waterPresent || waterMissingStartedAt == 0) {
     buzzerOff();
     return;
   }
@@ -369,17 +730,117 @@ bool readWaterSensor() {
   return SENSOR_LOW_MEANS_WATER_PRESENT ? pinIsLow : !pinIsLow;
 }
 
+void handleStatusJson() {
+  unsigned long elapsed = 0;
+  if (!stableWaterPresent && waterMissingStartedAt > 0) {
+    elapsed = millis() - waterMissingStartedAt;
+  }
+  
+  String json = "{";
+  json += "\"water\":" + String(stableWaterPresent ? "true" : "false") + ",";
+  json += "\"led\":" + String(ledEnabled ? "true" : "false") + ",";
+  json += "\"buz\":" + String(buzzerEnabled ? "true" : "false") + ",";
+  json += "\"failed\":" + String(wifiConnectionFailed ? "true" : "false") + ",";
+  json += "\"connected\":" + String((WiFi.status() == WL_CONNECTED) ? "true" : "false") + ",";
+  json += "\"elapsed\":" + String(elapsed);
+  json += "}";
+  webServer.send(200, "application/json", json);
+}
+
+void serveConfigPage() {
+  String html = HTML_CONFIG_PAGE;
+  
+  bool isConnected = (WiFi.status() == WL_CONNECTED);
+  
+  String wifiIconStr = isConnected ? 
+    "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align: middle;\"><path d=\"M5 12.55a11 11 0 0 1 14.08 0\"></path><path d=\"M1.42 9a16 16 0 0 1 21.16 0\"></path><path d=\"M8.53 16.11a6 6 0 0 1 6.95 0\"></path><line x1=\"12\" y1=\"20\" x2=\"12.01\" y2=\"20\" stroke-width=\"3\"></line></svg>" :
+    "<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"#ffffff\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" style=\"vertical-align: middle;\"><line x1=\"1\" y1=\"1\" x2=\"23\" y2=\"23\"></line><path d=\"M16.72 11.06A10.94 10.94 0 0 1 19 12.55\"></path><path d=\"M5 12.55a10.94 10.94 0 0 1 5.83-2.84\"></path><path d=\"M1.42 9a16 16 0 0 1 12.58-4.7\"></path><path d=\"M20 7.24a15.7 15.7 0 0 1 2.58 1.76\"></path><path d=\"M8.53 16.11a6 6 0 0 1 6.95 0\"></path><line x1=\"12\" y1=\"20\" x2=\"12.01\" y2=\"20\" stroke-width=\"3\"></line></svg>";
+  
+  unsigned long elapsed = 0;
+  if (!stableWaterPresent && waterMissingStartedAt > 0) {
+    elapsed = millis() - waterMissingStartedAt;
+  }
+  
+  // Calculate initial emoji in C++ for the first pageload
+  String initialEmoji = "🟢";
+  if (!stableWaterPresent) {
+    initialEmoji = "🔴";
+  }
+  String waterStatusText = "Вода: <span id=\"water-emoji\" style=\"display: inline-block; transition: opacity 0.15s ease-in-out;\">" + initialEmoji + "</span>";
+  
+  html.replace("%WIFI_ICON%", wifiIconStr);
+  html.replace("%WIFI_STATUS%", waterStatusText);
+  html.replace("%SPOILER_STATE%", isConnected ? "" : "open");
+  html.replace("%SSID%", wifiSsid);
+  html.replace("%PASS%", wifiPassword);
+  html.replace("%LED_CHECKED%", ledEnabled ? "checked" : "");
+  html.replace("%BUZ_CHECKED%", buzzerEnabled ? "checked" : "");
+  webServer.send(200, "text/html", html);
+}
+
+void handleSave() {
+  if (webServer.hasArg("ssid")) {
+    wifiSsid = webServer.arg("ssid");
+    wifiPassword = webServer.arg("pass");
+    
+    preferences.begin("wifi_config", false);
+    preferences.putString("ssid", wifiSsid);
+    preferences.putString("pass", wifiPassword);
+    preferences.end();
+    
+    webServer.send(200, "text/plain", "OK");
+    
+    Serial.println("Saved new WiFi configurations. Reconnecting...");
+    
+    WiFi.disconnect();
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
+    wifiConnecting = true;
+    wifiConnectionStartedAt = millis();
+    wifiConnectionFailed = false;
+  } else {
+    webServer.send(400, "text/plain", "Bad Request");
+  }
+}
+
+void handleToggle() {
+  if (webServer.hasArg("type") && webServer.hasArg("val")) {
+    String type = webServer.arg("type");
+    bool val = (webServer.arg("val") == "1");
+    
+    preferences.begin("wifi_config", false);
+    if (type == "led") {
+      ledEnabled = val;
+      preferences.putBool("led_en", ledEnabled);
+      if (!ledEnabled) {
+        setLed(colorOff());
+      } else {
+        setLed(stableWaterPresent ? colorGreen() : colorRed());
+      }
+      Serial.print("LED toggled via Web: ");
+      Serial.println(ledEnabled ? "ON" : "OFF");
+    } else if (type == "buz") {
+      buzzerEnabled = val;
+      preferences.putBool("buz_en", buzzerEnabled);
+      if (!buzzerEnabled) {
+        buzzerOff();
+      }
+      Serial.print("Buzzer toggled via Web: ");
+      Serial.println(buzzerEnabled ? "ON" : "OFF");
+    }
+    preferences.end();
+    
+    webServer.send(200, "text/plain", "OK");
+  } else {
+    webServer.send(400, "text/plain", "Bad Request");
+  }
+}
+
 void monitorWiFi() {
   const unsigned long now = millis();
-  static unsigned long lastCheck = 0;
-  if (now - lastCheck < 2000) {
-    return;
-  }
-  lastCheck = now;
-
-  static wl_status_t lastStatus = WL_IDLE_STATUS;
   wl_status_t currentStatus = WiFi.status();
 
+  static wl_status_t lastStatus = WL_NO_SHIELD;
   if (currentStatus != lastStatus) {
     lastStatus = currentStatus;
     Serial.print("WiFi status changed: ");
@@ -388,15 +849,6 @@ void monitorWiFi() {
         Serial.print("CONNECTED, IP: ");
         Serial.println(WiFi.localIP());
         break;
-      case WL_NO_SSID_AVAIL:
-        Serial.println("SSID NOT AVAILABLE");
-        break;
-      case WL_CONNECT_FAILED:
-        Serial.println("CONNECTION FAILED");
-        break;
-      case WL_CONNECTION_LOST:
-        Serial.println("CONNECTION LOST");
-        break;
       case WL_DISCONNECTED:
         Serial.println("DISCONNECTED");
         break;
@@ -404,6 +856,64 @@ void monitorWiFi() {
         Serial.println(currentStatus);
         break;
     }
+  }
+
+  // 1. Connection success handling
+  if (currentStatus == WL_CONNECTED) {
+    if (wifiConnecting) {
+      wifiConnecting = false;
+      wifiConnectionFailed = false;
+      wifiConnectedAt = now;
+      Serial.println("WiFi connection established.");
+    }
+    
+    // If AP is active, turn it off after a 3-second delay
+    if (apModeActive) {
+      if (now - wifiConnectedAt >= 3000) {
+        dnsServer.stop();
+        webServer.stop();
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(WIFI_STA);
+        apModeActive = false;
+        Serial.println("AP mode 'YeVoda' disabled after 3s delay.");
+      }
+    }
+  } 
+  // 2. Connection failure / drop handling
+  else {
+    if (wifiConnecting) {
+      if (now - wifiConnectionStartedAt >= 15000) {
+        wifiConnecting = false;
+        wifiConnectionFailed = true;
+        
+        // Start AP Mode in pure WIFI_AP mode for maximum stability
+        WiFi.disconnect();
+        WiFi.mode(WIFI_AP);
+        IPAddress local_IP(192, 168, 4, 1);
+        IPAddress gateway(192, 168, 4, 1);
+        IPAddress subnet(255, 255, 255, 0);
+        WiFi.softAPConfig(local_IP, gateway, subnet);
+        WiFi.softAP("YeVoda");
+        
+        dnsServer.start(53, "*", WiFi.softAPIP());
+        
+        apModeActive = true;
+        Serial.println("AP mode 'YeVoda' enabled (SSID: YeVoda, no password).");
+      }
+    } else if (!apModeActive) {
+      // Normal connection loss during operation -> trigger reconnect
+      Serial.println("WiFi disconnected. Reconnecting...");
+      WiFi.disconnect();
+      WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
+      wifiConnecting = true;
+      wifiConnectionStartedAt = now;
+      wifiConnectionFailed = false;
+    }
+  }
+
+  // Handle server loops if AP is active
+  if (apModeActive) {
+    dnsServer.processNextRequest();
   }
 }
 
@@ -536,6 +1046,11 @@ void telegramTask(void* parameter) {
 }
 
 void handleNotifications() {
+  // If there are no active subscribers, bypass the notification queue entirely
+  if (!hasActiveSubscribers()) {
+    return;
+  }
+
   const unsigned long now = millis();
 
   if (!stableWaterPresent) {
@@ -609,11 +1124,36 @@ void setup() {
   led.setBrightness(50); // Reduced from 200 to stabilize power rail
   setLed(colorBlue());
 
+  preferences.begin("wifi_config", false);
+  wifiSsid = preferences.getString("ssid", DEFAULT_WIFI_SSID);
+  wifiPassword = preferences.getString("pass", DEFAULT_WIFI_PASSWORD);
+  ledEnabled = preferences.getBool("led_en", true);
+  buzzerEnabled = preferences.getBool("buz_en", true);
+  preferences.end();
+
   // Initialize WiFi & Background Task
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
   Serial.println("Connecting to WiFi...");
+  wifiConnecting = true;
+  wifiConnectionStartedAt = millis();
+
+  // Setup Web Server routes always-on
+  webServer.on("/", serveConfigPage);
+  webServer.on("/save", HTTP_POST, handleSave);
+  webServer.on("/toggle", HTTP_GET, handleToggle);
+  webServer.on("/status_json", HTTP_GET, handleStatusJson);
+  webServer.onNotFound([]() {
+    serveConfigPage();
+  });
+  webServer.begin();
+
+  // Start mDNS Responder (voda.local)
+  if (MDNS.begin("voda")) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.println("mDNS responder started: http://voda.local");
+  }
 
   xTaskCreatePinnedToCore(
     telegramTask,
@@ -636,6 +1176,7 @@ void setup() {
 
 void loop() {
   monitorWiFi();
+  webServer.handleClient(); // Always process webserver requests
 
   updateSensorState();
 
