@@ -61,7 +61,6 @@ enum TelegramMessage {
   MSG_BACK
 };
 volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
-volatile bool isTelegramActive = false;
 
 // Subscriber management using ESP32 Preferences (up to 20 clients)
 Preferences preferences;
@@ -153,11 +152,9 @@ void sendMainMenu(const String& chatId, const String& welcomeText) {
   } else {
     keyboardJson = "[[\"Є вода?\"],[\"Підписатись на сповіщення 🔔\"]]";
   }
-  isTelegramActive = true;
   securedClient.stop();
   securedClient.setInsecure();
   bot.sendMessageWithReplyKeyboard(chatId, welcomeText, "", keyboardJson, true);
-  isTelegramActive = false;
 }
 
 uint32_t colorGreen() {
@@ -259,7 +256,7 @@ void buzzerTone(unsigned int frequency) {
 }
 
 void updateWaterBuzzer(bool waterPresent) {
-  if (waterPresent || waterMissingStartedAt == 0 || isTelegramActive) {
+  if (waterPresent || waterMissingStartedAt == 0) {
     buzzerOff();
     return;
   }
@@ -396,7 +393,6 @@ void telegramTask(void* parameter) {
 
             Serial.print("Telegram task sending: ");
             Serial.println(text);
-            isTelegramActive = true;
             securedClient.stop(); // Clean socket before request
             securedClient.setInsecure();
             
@@ -409,8 +405,6 @@ void telegramTask(void* parameter) {
                 }
               }
             }
-            
-            isTelegramActive = false;
             
             if (success) {
               Serial.println("Telegram send SUCCESS");
@@ -433,11 +427,9 @@ void telegramTask(void* parameter) {
     if (WiFi.status() == WL_CONNECTED && (now - lastUpdateCheckAt >= 4000)) {
       lastUpdateCheckAt = now;
 
-      isTelegramActive = true;
       securedClient.stop(); // Clean socket before request
       securedClient.setInsecure();
       int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-      isTelegramActive = false;
 
       while (numNewMessages) {
         for (int i = 0; i < numNewMessages; i++) {
@@ -468,17 +460,13 @@ void telegramTask(void* parameter) {
             } else {
               reply = "Ні, вода закінчилась! 🔴";
             }
-            isTelegramActive = true;
             securedClient.stop();
             bot.sendMessage(chatId, reply, "");
-            isTelegramActive = false;
           }
         }
         
-        isTelegramActive = true;
         securedClient.stop(); // Clean socket before request
         numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-        isTelegramActive = false;
       }
     }
 
@@ -490,12 +478,6 @@ void handleNotifications() {
   const unsigned long now = millis();
 
   if (!stableWaterPresent) {
-    // Wait 150ms to let the first buzzer beep finish, so we send the message
-    // during the natural silent pause to prevent power dropouts.
-    if (waterMissingStartedAt != 0 && (now - waterMissingStartedAt < 150)) {
-      return;
-    }
-
     const bool repeatAllowed = (lastEmptyNotificationAt == 0) || (now - lastEmptyNotificationAt >= TELEGRAM_MIN_REPEAT_MS);
     if (!lastNotifiedEmpty || repeatAllowed) {
       lastNotifiedEmpty = true;
