@@ -356,16 +356,7 @@ void telegramTask(void* parameter) {
   unsigned long lastUpdateCheckAt = 0;
 
   while (true) {
-    // Check and print if time has synchronized
-    static bool timeSynced = false;
-    if (!timeSynced) {
-      time_t nowTime = time(nullptr);
-      if (nowTime >= 1700000000) {
-        timeSynced = true;
-        Serial.print("NTP Time synchronized: ");
-        Serial.println(ctime(&nowTime));
-      }
-    }
+    // No NTP time sync needed
 
     // 1. Process pending notifications
     TelegramMessage msg = pendingTelegramMessage;
@@ -567,8 +558,7 @@ void setup() {
     WiFi.mode(WIFI_STA);
     WiFi.setTxPower(WIFI_POWER_8_5dBm);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    configTime(0, 0, "time.google.com", "time.windows.com");
-    Serial.println("Connecting to WiFi and syncing time...");
+    Serial.println("Connecting to WiFi...");
 
     xTaskCreatePinnedToCore(
       telegramTask,
