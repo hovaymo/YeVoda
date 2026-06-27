@@ -391,11 +391,7 @@ void telegramTask(void* parameter) {
               vTaskDelay(pdMS_TO_TICKS(1000));
             }
 
-            time_t nowTime = time(nullptr);
-            while (nowTime < 1700000000) {
-              vTaskDelay(pdMS_TO_TICKS(1500));
-              nowTime = time(nullptr);
-            }
+            // No NTP sync check needed, setInsecure() handles TLS verification
 
             if (pendingTelegramMessage != MSG_NONE) {
               break;
@@ -440,54 +436,51 @@ void telegramTask(void* parameter) {
     if (WiFi.status() == WL_CONNECTED && (now - lastUpdateCheckAt >= 4000)) {
       lastUpdateCheckAt = now;
 
-      time_t nowTime = time(nullptr);
-      if (nowTime >= 1700000000) { // Only poll if time is synced
+      isTelegramActive = true;
+      securedClient.stop(); // Clean socket before request
+      securedClient.setInsecure();
+      int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+      isTelegramActive = false;
+
+      while (numNewMessages) {
+        for (int i = 0; i < numNewMessages; i++) {
+          // Update the offset immediately to prevent reprocessing this message on retry or next tick
+          if (bot.messages[i].update_id > bot.last_message_received) {
+            bot.last_message_received = bot.messages[i].update_id;
+          }
+
+          String chatId = String(bot.messages[i].chat_id);
+          String text = bot.messages[i].text;
+
+          if (text == "/start") {
+            sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
+          } 
+          else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
+            addSubscriber(chatId);
+            sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
+          }
+          else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
+            removeSubscriber(chatId);
+            sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
+          }
+          else if (text == "Є вода?" || text == "/status") {
+            String reply = "";
+            if (stableWaterPresent) {
+              reply = "Так, вода є. 🟢";
+            } else {
+              reply = "Ні, вода закінчилась! 🔴";
+            }
+            isTelegramActive = true;
+            securedClient.stop();
+            bot.sendMessage(chatId, reply, "");
+            isTelegramActive = false;
+          }
+        }
+        
         isTelegramActive = true;
         securedClient.stop(); // Clean socket before request
-        securedClient.setInsecure();
-        int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+        numNewMessages = bot.getUpdates(bot.last_message_received + 1);
         isTelegramActive = false;
-
-        while (numNewMessages) {
-          for (int i = 0; i < numNewMessages; i++) {
-            // Update the offset immediately to prevent reprocessing this message on retry or next tick
-            if (bot.messages[i].update_id > bot.last_message_received) {
-              bot.last_message_received = bot.messages[i].update_id;
-            }
-
-            String chatId = String(bot.messages[i].chat_id);
-            String text = bot.messages[i].text;
-
-            if (text == "/start") {
-              sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
-            } 
-            else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
-              addSubscriber(chatId);
-              sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
-            }
-            else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
-              removeSubscriber(chatId);
-              sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
-            }
-            else if (text == "Є вода?" || text == "/status") {
-              String reply = "";
-              if (stableWaterPresent) {
-                reply = "Так, вода є. 🟢";
-              } else {
-                reply = "Ні, вода закінчилась! 🔴";
-              }
-              isTelegramActive = true;
-              securedClient.stop();
-              bot.sendMessage(chatId, reply, "");
-              isTelegramActive = false;
-            }
-          }
-          
-          isTelegramActive = true;
-          securedClient.stop(); // Clean socket before request
-          numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-          isTelegramActive = false;
-        }
       }
     }
 
