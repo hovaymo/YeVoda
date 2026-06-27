@@ -30,7 +30,7 @@ const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 const bool SENSOR_LOW_MEANS_WATER_PRESENT = true;
 
 // Timing
-const unsigned long SENSOR_DEBOUNCE_MS = 1000;
+const unsigned long SENSOR_DEBOUNCE_MS = 50;
 const unsigned long TELEGRAM_MIN_REPEAT_MS = 30UL * 60UL * 1000UL;
 const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
 const unsigned long LED_EMPTY_FADE_MS = 3000;
@@ -59,6 +59,7 @@ enum TelegramMessage {
   MSG_BACK
 };
 volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
+SemaphoreHandle_t telegramMutex;
 
 // Subscriber management using ESP32 Preferences (up to 20 clients)
 Preferences preferences;
@@ -380,13 +381,8 @@ void queueTelegramMessage(TelegramMessage msg) {
   pendingTelegramMessage = msg;
 }
 
-void telegramTask(void* parameter) {
-  unsigned long lastUpdateCheckAt = 0;
-
+void telegramNotificationTask(void* parameter) {
   while (true) {
-    // No NTP time sync needed
-
-    // 1. Process pending notifications
     TelegramMessage msg = pendingTelegramMessage;
     if (msg != MSG_NONE) {
       pendingTelegramMessage = MSG_NONE; // Clear it
@@ -407,38 +403,41 @@ void telegramTask(void* parameter) {
           
           while (!success && attempts < 5) {
             while (WiFi.status() != WL_CONNECTED) {
-              vTaskDelay(pdMS_TO_TICKS(1000));
+              vTaskDelay(pdMS_TO_TICKS(500));
             }
-
-            // No NTP sync check needed, setInsecure() handles TLS verification
 
             if (pendingTelegramMessage != MSG_NONE) {
               break;
             }
 
-            Serial.print("Telegram task sending: ");
+            Serial.print("Telegram notification sending: ");
             Serial.println(text);
-            securedClient.stop(); // Clean socket before request
-            securedClient.setInsecure();
             
-            // Send only to active subscribers
-            success = false;
-            for (int i = 0; i < userCount; i++) {
-              if (users[i].length() > 0 && wantsNotifications[i]) {
-                if (bot.sendMessage(users[i], text, "")) {
-                  success = true; // Mark as success if at least one succeeds
+            // Acquire mutex for thread-safe SSL socket usage
+            if (xSemaphoreTake(telegramMutex, portMAX_DELAY) == pdTRUE) {
+              securedClient.stop(); // Clean socket before request
+              securedClient.setInsecure();
+              
+              // Send only to active subscribers
+              success = false;
+              for (int i = 0; i < userCount; i++) {
+                if (users[i].length() > 0 && wantsNotifications[i]) {
+                  if (bot.sendMessage(users[i], text, "")) {
+                    success = true; // Mark as success if at least one succeeds
+                  }
                 }
               }
+              securedClient.stop();
+              xSemaphoreGive(telegramMutex);
             }
             
             if (success) {
-              Serial.println("Telegram send SUCCESS");
+              Serial.println("Telegram notification SUCCESS");
             } else {
               char err_buf[100];
               securedClient.lastError(err_buf, 100);
-              Serial.print("Telegram send FAILED. SSL error: ");
+              Serial.print("Telegram notification FAILED. SSL error: ");
               Serial.println(err_buf);
-              Serial.println("Retrying in 5 seconds...");
               attempts++;
               vTaskDelay(pdMS_TO_TICKS(5000));
             }
@@ -446,55 +445,67 @@ void telegramTask(void* parameter) {
         }
       }
     }
+    vTaskDelay(pdMS_TO_TICKS(50)); // Check queue every 50ms
+  }
+}
 
-    // 2. Poll for incoming messages (every 1.5 seconds)
+void telegramPollingTask(void* parameter) {
+  unsigned long lastUpdateCheckAt = 0;
+
+  while (true) {
     const unsigned long now = millis();
     if (WiFi.status() == WL_CONNECTED && (now - lastUpdateCheckAt >= 1500)) {
       lastUpdateCheckAt = now;
 
-      securedClient.stop(); // Clean socket before request
-      securedClient.setInsecure();
-      int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+      int numNewMessages = 0;
 
-      while (numNewMessages) {
-        for (int i = 0; i < numNewMessages; i++) {
-          // Update the offset immediately to prevent reprocessing this message on retry or next tick
-          if (bot.messages[i].update_id > bot.last_message_received) {
-            bot.last_message_received = bot.messages[i].update_id;
-          }
-
-          String chatId = String(bot.messages[i].chat_id);
-          String text = bot.messages[i].text;
-
-          if (text == "/start") {
-            registerUser(chatId);
-            sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
-          } 
-          else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
-            setNotificationPreference(chatId, true);
-            sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
-          }
-          else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
-            setNotificationPreference(chatId, false);
-            sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
-          }
-          else if (text == "Є вода?" || text == "/status") {
-            String reply = "";
-            if (stableWaterPresent) {
-              reply = "Так, вода є. 🟢";
-            } else {
-              reply = "Ні, вода закінчилась! 🔴";
-            }
-            securedClient.stop();
-            bot.sendMessage(chatId, reply, "");
-          }
-        }
-        
+      // Acquire mutex for thread-safe SSL socket usage
+      if (xSemaphoreTake(telegramMutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
         securedClient.stop(); // Clean socket before request
+        securedClient.setInsecure();
         numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+
+        if (numNewMessages == 0) {
+          securedClient.stop();
+          xSemaphoreGive(telegramMutex);
+        } else {
+          // Process messages while holding the mutex
+          for (int i = 0; i < numNewMessages; i++) {
+            if (bot.messages[i].update_id > bot.last_message_received) {
+              bot.last_message_received = bot.messages[i].update_id;
+            }
+
+            String chatId = String(bot.messages[i].chat_id);
+            String text = bot.messages[i].text;
+
+            if (text == "/start") {
+              registerUser(chatId);
+              sendMainMenu(chatId, "Привіт! Скористайтесь кнопками нижче для керування та перевірки води. 💧");
+            } 
+            else if (text == "Підписатись на сповіщення 🔔" || text == "/start_notify") {
+              setNotificationPreference(chatId, true);
+              sendMainMenu(chatId, "Сповіщення увімкнено. 🔔");
+            }
+            else if (text == "Не сповіщати 🔕" || text == "/stop_notify" || text == "/stop") {
+              setNotificationPreference(chatId, false);
+              sendMainMenu(chatId, "Сповіщення вимкнено. 🔕");
+            }
+            else if (text == "Є вода?" || text == "/status") {
+              String reply = "";
+              if (stableWaterPresent) {
+                reply = "Так, вода є. 🟢";
+              } else {
+                reply = "Ні, вода закінчилась! 🔴";
+              }
+              securedClient.stop();
+              bot.sendMessage(chatId, reply, "");
+            }
+          }
+          securedClient.stop();
+          xSemaphoreGive(telegramMutex);
+        }
       }
     }
-
     vTaskDelay(pdMS_TO_TICKS(100)); // Poll loop every 100ms
   }
 }
@@ -572,9 +583,21 @@ void setup() {
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.println("Connecting to WiFi...");
 
+  telegramMutex = xSemaphoreCreateMutex();
+
   xTaskCreatePinnedToCore(
-    telegramTask,
-    "TelegramTask",
+    telegramNotificationTask,
+    "TelegramNotify",
+    8192,
+    NULL,
+    1,
+    NULL,
+    0
+  );
+
+  xTaskCreatePinnedToCore(
+    telegramPollingTask,
+    "TelegramPoll",
     8192,
     NULL,
     1,
