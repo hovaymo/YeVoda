@@ -398,49 +398,38 @@ void telegramNotificationTask(void* parameter) {
         if (!hasActiveSubscribers()) {
           Serial.println("No active subscribers. Skipping Telegram notification.");
         } else {
-          bool success = false;
-          int attempts = 0;
+          while (WiFi.status() != WL_CONNECTED) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+          }
+
+          Serial.print("Telegram notification sending: ");
+          Serial.println(text);
           
-          while (!success && attempts < 5) {
-            while (WiFi.status() != WL_CONNECTED) {
-              vTaskDelay(pdMS_TO_TICKS(500));
-            }
-
-            if (pendingTelegramMessage != MSG_NONE) {
-              break;
-            }
-
-            Serial.print("Telegram notification sending: ");
-            Serial.println(text);
+          bool success = false;
+          // Acquire mutex for thread-safe SSL socket usage
+          if (xSemaphoreTake(telegramMutex, portMAX_DELAY) == pdTRUE) {
+            securedClient.stop(); // Clean socket before request
+            securedClient.setInsecure();
             
-            // Acquire mutex for thread-safe SSL socket usage
-            if (xSemaphoreTake(telegramMutex, portMAX_DELAY) == pdTRUE) {
-              securedClient.stop(); // Clean socket before request
-              securedClient.setInsecure();
-              
-              // Send only to active subscribers
-              success = false;
-              for (int i = 0; i < userCount; i++) {
-                if (users[i].length() > 0 && wantsNotifications[i]) {
-                  if (bot.sendMessage(users[i], text, "")) {
-                    success = true; // Mark as success if at least one succeeds
-                  }
+            // Send only to active subscribers
+            for (int i = 0; i < userCount; i++) {
+              if (users[i].length() > 0 && wantsNotifications[i]) {
+                if (bot.sendMessage(users[i], text, "")) {
+                  success = true; // Mark as success if at least one succeeds
                 }
               }
-              securedClient.stop();
-              xSemaphoreGive(telegramMutex);
             }
-            
-            if (success) {
-              Serial.println("Telegram notification SUCCESS");
-            } else {
-              char err_buf[100];
-              securedClient.lastError(err_buf, 100);
-              Serial.print("Telegram notification FAILED. SSL error: ");
-              Serial.println(err_buf);
-              attempts++;
-              vTaskDelay(pdMS_TO_TICKS(5000));
-            }
+            securedClient.stop();
+            xSemaphoreGive(telegramMutex);
+          }
+          
+          if (success) {
+            Serial.println("Telegram notification SUCCESS");
+          } else {
+            char err_buf[100];
+            securedClient.lastError(err_buf, 100);
+            Serial.print("Telegram notification FAILED. SSL error: ");
+            Serial.println(err_buf);
           }
         }
       }
