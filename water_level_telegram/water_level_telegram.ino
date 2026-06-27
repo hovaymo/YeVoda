@@ -422,9 +422,7 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
     </div>
   </div>
   
-  <details %SPOILER_STATE%>
-    <summary>Налаштування</summary>
-    <div class="spoiler-content">
+  %WIFI_FORM_START%
       <form id="wifi-form" onsubmit="saveWiFi(event)">
         <div class="group">
           <label>Wi-Fi Мережа</label>
@@ -439,25 +437,7 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
         </div>
         <button type="submit" class="btn">Зберегти та підключити</button>
       </form>
-      
-      <div class="divider" style="margin: 20px 0;"></div>
-      
-      <div class="group">
-        <label>Мелодія тривоги</label>
-        <select id="melody-select" onchange="setMelody(this.value)">
-          <option value="0" %MELODY_SEL_0%>Всі мелодії по колу 🔁</option>
-          <option value="1" %MELODY_SEL_1%>Весела 🤖</option>
-          <option value="2" %MELODY_SEL_2%>Ніжна 🥰</option>
-          <option value="3" %MELODY_SEL_3%>Ультра-весела 🎉</option>
-          <option value="4" %MELODY_SEL_4%>Упс! 🙊</option>
-          <option value="5" %MELODY_SEL_5%>Здивування 😲</option>
-          <option value="6" %MELODY_SEL_6%>З'єднання 📡</option>
-          <option value="7" %MELODY_SEL_7%>Робот 👾</option>
-          <option value="8" %MELODY_SEL_8%>Стрибок 🦘</option>
-        </select>
-      </div>
-    </div>
-  </details>
+  %WIFI_FORM_END%
   
   <div class="divider"></div>
   
@@ -476,6 +456,26 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
       <span class="slider"></span>
     </label>
   </div>
+  
+  %MELODY_SPOILER_START%
+    <summary>Вибір мелодії</summary>
+    <div class="spoiler-content">
+      <div class="group">
+        <label>Мелодія тривоги</label>
+        <select id="melody-select" onchange="setMelody(this.value)">
+          <option value="0" %MELODY_SEL_0%>Всі мелодії по колу 🔁</option>
+          <option value="1" %MELODY_SEL_1%>Весела 🤖</option>
+          <option value="2" %MELODY_SEL_2%>Ніжна 🥰</option>
+          <option value="3" %MELODY_SEL_3%>Ультра-весела 🎉</option>
+          <option value="4" %MELODY_SEL_4%>Упс! 🙊</option>
+          <option value="5" %MELODY_SEL_5%>Здивування 😲</option>
+          <option value="6" %MELODY_SEL_6%>З'єднання 📡</option>
+          <option value="7" %MELODY_SEL_7%>Робот 👾</option>
+          <option value="8" %MELODY_SEL_8%>Стрибок 🦘</option>
+        </select>
+      </div>
+    </div>
+  %MELODY_SPOILER_END%
 </div>
 
 <script>
@@ -850,7 +850,7 @@ void buzzerTone(unsigned int frequency) {
 void updateWaterBuzzer(bool waterPresent) {
   // If preview is active, play the preview instead of the regular alarm
   if (previewActive && buzzerEnabled) {
-    if (millis() - previewStartedAt >= 4000) {
+    if (millis() - previewStartedAt >= 3000) {
       buzzerOff();
       previewActive = false;
       return;
@@ -969,11 +969,22 @@ void serveConfigPage() {
   
   html.replace("%WIFI_ICON%", wifiIconStr);
   html.replace("%WIFI_STATUS%", waterStatusText);
-  html.replace("%SPOILER_STATE%", isConnected ? "" : "open");
   html.replace("%SSID%", wifiSsid);
   html.replace("%PASS%", wifiPassword);
   html.replace("%LED_CHECKED%", ledEnabled ? "checked" : "");
   html.replace("%BUZ_CHECKED%", buzzerEnabled ? "checked" : "");
+  
+  if (isConnected) {
+    html.replace("%WIFI_FORM_START%", "<details><summary>Налаштування Wi-Fi</summary><div class=\"spoiler-content\">");
+    html.replace("%WIFI_FORM_END%", "</div></details>");
+    html.replace("%MELODY_SPOILER_START%", "<details style=\"margin-top: 20px;\">");
+    html.replace("%MELODY_SPOILER_END%", "</details>");
+  } else {
+    html.replace("%WIFI_FORM_START%", "");
+    html.replace("%WIFI_FORM_END%", "");
+    html.replace("%MELODY_SPOILER_START%", "<details style=\"display:none;\">");
+    html.replace("%MELODY_SPOILER_END%", "</details>");
+  }
   
   for (int i = 0; i <= 8; i++) {
     String placeholder = "%MELODY_SEL_" + String(i) + "%";
@@ -995,7 +1006,7 @@ void handleSetMelody() {
     
     webServer.send(200, "text/plain", "OK");
     
-    // If a specific melody is selected (1-8), trigger the 4s preview asynchronously
+    // If a specific melody is selected (1-8), trigger the 3s preview asynchronously
     if (melodyMode >= 1 && melodyMode <= 8) {
       previewMelodyIndex = melodyMode - 1;
       previewStartedAt = millis();
