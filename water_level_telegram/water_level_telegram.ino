@@ -324,19 +324,15 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
   select {
     width: 100%;
     box-sizing: border-box;
-    padding: 12px 10px;
+    padding: 10px;
     border: 1px solid #334155;
-    background-color: #17171f;
+    background-color: #22222e;
     color: #f8fafc;
     border-radius: 6px;
     font-size: 16px;
     outline: none;
     transition: border-color 0.2s;
     cursor: pointer;
-    appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg fill='%23f59e0b' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>");
-    background-repeat: no-repeat;
-    background-position: right 10px center;
   }
   select:focus {
     border-color: #f59e0b;
