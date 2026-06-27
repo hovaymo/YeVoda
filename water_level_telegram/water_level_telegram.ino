@@ -420,9 +420,9 @@ void telegramTask(void* parameter) {
       }
     }
 
-    // 2. Poll for incoming messages (every 4 seconds)
+    // 2. Poll for incoming messages (every 1.5 seconds)
     const unsigned long now = millis();
-    if (WiFi.status() == WL_CONNECTED && (now - lastUpdateCheckAt >= 4000)) {
+    if (WiFi.status() == WL_CONNECTED && (now - lastUpdateCheckAt >= 1500)) {
       lastUpdateCheckAt = now;
 
       securedClient.stop(); // Clean socket before request
@@ -521,6 +521,7 @@ void printSensorStatus(const char* reason, int pinState) {
 
 void setup() {
   Serial.begin(115200);
+  setCpuFrequencyMhz(160); // Set CPU to max 160MHz to speed up SSL math
   delay(300);
   Serial.println();
   Serial.println("Water level monitor started");
