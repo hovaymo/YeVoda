@@ -30,7 +30,7 @@ const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 const bool SENSOR_LOW_MEANS_WATER_PRESENT = true;
 
 // Timing
-const unsigned long SENSOR_DEBOUNCE_MS = 50;
+const unsigned long SENSOR_DEBOUNCE_MS = 300;
 const unsigned long TELEGRAM_MIN_REPEAT_MS = 30UL * 60UL * 1000UL;
 const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
 const unsigned long LED_EMPTY_FADE_MS = 3000;
@@ -70,16 +70,41 @@ int userCount = 0;
 
 void loadSubscribers() {
   preferences.begin("tg_users", false);
-  userCount = preferences.getInt("count", 0);
-  if (userCount > MAX_USERS) {
-    userCount = MAX_USERS;
-  }
-  for (int i = 0; i < userCount; i++) {
-    users[i] = preferences.getString(("u" + String(i)).c_str(), "");
-    wantsNotifications[i] = preferences.getBool(("n" + String(i)).c_str(), false);
+  int rawCount = preferences.getInt("count", 0);
+  userCount = 0;
+
+  for (int i = 0; i < rawCount; i++) {
+    String u = preferences.getString(("u" + String(i)).c_str(), "");
+    bool n = preferences.getBool(("n" + String(i)).c_str(), false);
+
+    // Filter out group IDs (starting with '-') and duplicate entries
+    if (u.length() > 0 && !u.startsWith("-")) {
+      bool duplicate = false;
+      for (int j = 0; j < userCount; j++) {
+        if (users[j] == u) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate && userCount < MAX_USERS) {
+        users[userCount] = u;
+        wantsNotifications[userCount] = n;
+        userCount++;
+      }
+    }
   }
   preferences.end();
-  Serial.print("Loaded ");
+
+  // Re-save clean registry back to flash memory
+  preferences.begin("tg_users", false);
+  preferences.putInt("count", userCount);
+  for (int i = 0; i < userCount; i++) {
+    preferences.putString(("u" + String(i)).c_str(), users[i]);
+    preferences.putBool(("n" + String(i)).c_str(), wantsNotifications[i]);
+  }
+  preferences.end();
+
+  Serial.print("Loaded and cleaned: ");
   Serial.print(userCount);
   Serial.println(" users.");
 }
@@ -93,6 +118,9 @@ void saveUser(int index) {
 }
 
 void registerUser(const String& chatId) {
+  if (chatId.startsWith("-")) {
+    return; // Do not register groups or channels as private subscribers
+  }
   for (int i = 0; i < userCount; i++) {
     if (users[i] == chatId) {
       return; // Already registered
