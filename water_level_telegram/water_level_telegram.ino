@@ -21,7 +21,7 @@ const char* WIFI_SSID = "TP-LINK_C070";
 const char* WIFI_PASSWORD = "98337606";
 
 // Telegram
-const char* BOT_TOKEN = "8815550223:AAEd9c_mdW_Nq3eSQVk6yY3fpHhua_rqtKI";
+const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 const char* CHAT_ID = "-1004435895448"; // Channel ID "Є вода?"
 
 // Wi-Fi and Telegram notifications configuration
