@@ -9,7 +9,8 @@
 
 // Pins
 const uint8_t WATER_SENSOR_PIN = 4;  // Yellow OUT from XKC-Y25-NPN
-const uint8_t LED_PIN = 8;           // Onboard addressable NeoPixel LED
+const uint8_t LED_PIN = 21;          // External SK6812 LED on GPIO21
+const uint8_t ONBOARD_LED_PIN = 8;   // Onboard NeoPixel LED on GPIO8
 const uint8_t BUZZER_PIN = 2;        // Buzzer pin (Passive or Active)
 const uint8_t LED_COUNT = 1;
 const uint8_t BUZZER_RESOLUTION = 8;
@@ -22,7 +23,7 @@ const char* DEFAULT_WIFI_SSID = "Your_WiFi_SSID";
 const char* DEFAULT_WIFI_PASSWORD = "Your_WiFi_Password";
 
 // Telegram Bot configuration
-const char* BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN";
+const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 
 
 
@@ -58,7 +59,7 @@ enum TelegramMessage {
   MSG_EMPTY,
   MSG_BACK
 };
-volatile TelegramMessage pendingTelegramMessage = MSG_NONE;
+QueueHandle_t telegramQueue = NULL;
 
 // Pre-defined robotic melodies array to cycle through (indexes 0 to 7)
 const int CUTE_MELODIES_COUNT = 8;
@@ -177,6 +178,7 @@ void playCuteSound(int soundName) {
 }
 
 Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRBW + NEO_KHZ800);
+Adafruit_NeoPixel ledOnboard(LED_COUNT, ONBOARD_LED_PIN, NEO_GRB + NEO_KHZ800);
 WiFiClientSecure securedClient;
 UniversalTelegramBot bot(BOT_TOKEN, securedClient);
 
@@ -194,7 +196,7 @@ bool previewMelodyPlayed = false;
 unsigned long lastPreviewMelodyFinishedAt = 0;
 
 bool apModeActive = false;
-bool wifiConnecting = true;
+bool wifiConnecting = false;
 bool wifiConnectionFailed = false;
 unsigned long wifiConnectionStartedAt = 0;
 unsigned long wifiConnectedAt = 0;
@@ -598,6 +600,7 @@ bool stableWaterPresent = false;
 bool lastRawWaterPresent = false;
 bool lastNotifiedEmpty = false;
 int lastPrintedPinState = -1;
+bool networkStarted = false;
 
 unsigned long rawChangedAt = 0;
 unsigned long lastEmptyNotificationAt = 0;
@@ -785,12 +788,43 @@ uint32_t colorOff() {
 
 
 void setLed(uint32_t color) {
-  if (!ledEnabled) {
-    led.setPixelColor(0, colorOff());
-  } else {
-    led.setPixelColor(0, color);
+  static uint32_t lastColor = 0xFFFFFFFF;
+  static bool lastEnabled = false;
+  static bool firstRun = true;
+
+  if (!firstRun && color == lastColor && ledEnabled == lastEnabled) {
+    return; // Skip update to prevent high-frequency noise on power rails
   }
+  firstRun = false;
+  lastColor = color;
+  lastEnabled = ledEnabled;
+
+  uint32_t extColor = color;
+  uint32_t onboardColor = color;
+
+  // Unpack components to convert to RGB for onboard LED
+  uint8_t r = (color >> 16) & 0xFF;
+  uint8_t g = (color >> 8) & 0xFF;
+  uint8_t b = color & 0xFF;
+  uint8_t w = (color >> 24) & 0xFF;
+
+  if (!ledEnabled) {
+    extColor = colorOff();
+    onboardColor = ledOnboard.Color(0, 0, 0);
+  } else {
+    // If white channel is active but RGB is 0, mix RGB for the onboard RGB LED
+    if (w > 0 && r == 0 && g == 0 && b == 0) {
+      onboardColor = ledOnboard.Color(w, w, w);
+    } else {
+      onboardColor = ledOnboard.Color(r, g, b);
+    }
+  }
+
+  led.setPixelColor(0, extColor);
+  ledOnboard.setPixelColor(0, onboardColor);
+
   led.show();
+  ledOnboard.show();
 }
 
 uint32_t blendColor(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t w1,
@@ -866,6 +900,9 @@ void updateWaterBuzzer(bool waterPresent) {
     return;
   }
 
+  static unsigned long nextBuzzerActionAt = 0;
+  static int buzzerSequenceState = 0;
+
   if (waterPresent) {
     buzzerOff();
     if (alarmMelodyPlayed) {
@@ -873,49 +910,75 @@ void updateWaterBuzzer(bool waterPresent) {
       currentMelodyIndex = (currentMelodyIndex + 1) % CUTE_MELODIES_COUNT;
       alarmMelodyPlayed = false;
     }
+    buzzerSequenceState = 0;
+    nextBuzzerActionAt = 0;
     return;
   }
 
   if (!buzzerEnabled || waterMissingStartedAt == 0) {
     buzzerOff();
+    buzzerSequenceState = 0;
+    nextBuzzerActionAt = 0;
     return;
   }
 
-  const unsigned long now = millis();
-  const unsigned long missingFor = now - waterMissingStartedAt;
-
-  // Immediate beep when water disappears (0 - 150 ms)
-  if (missingFor < 150) {
-    buzzerTone(3000);
+  // State machine for initial beeps (0 to 5 seconds)
+  if (buzzerSequenceState < 6) {
+    const unsigned long now = millis();
+    if (buzzerSequenceState == 0) {
+      // Step 1: Immediate beep (150ms)
+      buzzerTone(3000);
+      nextBuzzerActionAt = now + 150;
+      buzzerSequenceState = 1;
+    } 
+    else if (now >= nextBuzzerActionAt) {
+      if (buzzerSequenceState == 1) {
+        // Step 2: Silence (1850ms, until 2.0s mark)
+        buzzerOff();
+        nextBuzzerActionAt = now + 1850;
+        buzzerSequenceState = 2;
+      } 
+      else if (buzzerSequenceState == 2) {
+        // Step 3: Second beep (150ms, until 2.15s mark)
+        buzzerTone(3000);
+        nextBuzzerActionAt = now + 150;
+        buzzerSequenceState = 3;
+      } 
+      else if (buzzerSequenceState == 3) {
+        // Step 4: Silence (150ms, until 2.3s mark)
+        buzzerOff();
+        nextBuzzerActionAt = now + 150;
+        buzzerSequenceState = 4;
+      } 
+      else if (buzzerSequenceState == 4) {
+        // Step 5: Third beep (150ms, until 2.45s mark)
+        buzzerTone(3000);
+        nextBuzzerActionAt = now + 150;
+        buzzerSequenceState = 5;
+      } 
+      else if (buzzerSequenceState == 5) {
+        // Step 6: Silence (2550ms, until 5.0s mark)
+        buzzerOff();
+        nextBuzzerActionAt = now + 2550;
+        buzzerSequenceState = 6;
+      }
+    }
     return;
   }
 
-  // Beep-beep after 2 seconds:
-  if (missingFor >= 2000 && missingFor < 2150) {
-    buzzerTone(3000);
-    return;
-  }
-  if (missingFor >= 2300 && missingFor < 2450) {
-    buzzerTone(3000);
-    return;
-  }
-
-  if (missingFor < LED_EMPTY_FADE_MS) {
-    buzzerOff();
-    return;
-  }
-
-  // After 5 seconds, play the current melody in a loop with a 0.2-second pause
-  if (!alarmMelodyPlayed) {
-    int targetMelodyIdx = (melodyMode == 0) ? currentMelodyIndex : (melodyMode - 1);
-    playCuteSound(targetMelodyIdx);
-    
-    alarmMelodyPlayed = true;
-    lastMelodyFinishedAt = millis();
-  } else {
-    buzzerOff();
-    if (millis() - lastMelodyFinishedAt >= 200) { // 0.2 seconds of silence between repeats
-      alarmMelodyPlayed = false; // Trigger playing again
+  // After 5 seconds (buzzerSequenceState >= 6), play the current melody in a loop with a 0.2-second pause
+  if (millis() >= nextBuzzerActionAt) {
+    if (!alarmMelodyPlayed) {
+      int targetMelodyIdx = (melodyMode == 0) ? currentMelodyIndex : (melodyMode - 1);
+      playCuteSound(targetMelodyIdx);
+      
+      alarmMelodyPlayed = true;
+      lastMelodyFinishedAt = millis();
+    } else {
+      buzzerOff();
+      if (millis() - lastMelodyFinishedAt >= 200) { // 0.2 seconds of silence between repeats
+        alarmMelodyPlayed = false; // Trigger playing again
+      }
     }
   }
 }
@@ -970,17 +1033,17 @@ void serveConfigPage() {
   html.replace("%LED_CHECKED%", ledEnabled ? "checked" : "");
   html.replace("%BUZ_CHECKED%", buzzerEnabled ? "checked" : "");
   
+  // Wi-Fi settings conditional spoiler
   if (isConnected) {
     html.replace("%WIFI_FORM_START%", "<details><summary>Налаштування Wi-Fi</summary><div class=\"spoiler-content\">");
     html.replace("%WIFI_FORM_END%", "</div></details>");
-    html.replace("%MELODY_SPOILER_START%", "<details style=\"margin-top: 20px;\">");
-    html.replace("%MELODY_SPOILER_END%", "</details>");
   } else {
     html.replace("%WIFI_FORM_START%", "");
     html.replace("%WIFI_FORM_END%", "");
-    html.replace("%MELODY_SPOILER_START%", "<details style=\"display:none;\">");
-    html.replace("%MELODY_SPOILER_END%", "</details>");
   }
+  // Melody selector spoiler always rendered (outside Wi-Fi spoiler)
+  html.replace("%MELODY_SPOILER_START%", "<details style=\"margin-top: 20px;\">");
+  html.replace("%MELODY_SPOILER_END%", "</details>");
   
   for (int i = 0; i <= 8; i++) {
     String placeholder = "%MELODY_SEL_" + String(i) + "%";
@@ -1157,7 +1220,9 @@ void monitorWiFi() {
 }
 
 void queueTelegramMessage(TelegramMessage msg) {
-  pendingTelegramMessage = msg;
+  if (telegramQueue != NULL) {
+    xQueueSend(telegramQueue, &msg, 0);
+  }
 }
 
 void telegramTask(void* parameter) {
@@ -1184,9 +1249,8 @@ void telegramTask(void* parameter) {
     }
 
     // 1. Process pending notifications
-    TelegramMessage msg = pendingTelegramMessage;
-    if (msg != MSG_NONE) {
-      pendingTelegramMessage = MSG_NONE; // Clear it
+    TelegramMessage msg = MSG_NONE;
+    if (telegramQueue != NULL && xQueueReceive(telegramQueue, &msg, 0) == pdTRUE) {
 
       String text = "";
       if (msg == MSG_EMPTY) {
@@ -1343,35 +1407,13 @@ void printSensorStatus(const char* reason, int pinState) {
   Serial.println(WiFi.status() == WL_CONNECTED ? "CONNECTED" : "NOT_CONNECTED");
 }
 
-void setup() {
-  Serial.begin(115200);
-  setCpuFrequencyMhz(160); // Set CPU to max 160MHz to speed up SSL math
-  delay(300);
-  Serial.println();
-  Serial.println("Water level monitor started");
+void networkStartupTask(void* parameter) {
+  // Allow the offline system to run completely unimpeded for 5 seconds at startup
+  vTaskDelay(pdMS_TO_TICKS(5000));
 
-  pinMode(WATER_SENSOR_PIN, INPUT);
+  Serial.println("Starting network services asynchronously...");
 
-  loadSubscribers();
-
-  // Initialize Buzzer
-  pinMode(BUZZER_PIN, OUTPUT);
-  buzzerOff();
-
-  // Initialize Onboard NeoPixel
-  led.begin();
-  led.setBrightness(50); // Reduced from 200 to stabilize power rail
-  setLed(colorBlue());
-
-  preferences.begin("wifi_config", false);
-  wifiSsid = preferences.getString("ssid", DEFAULT_WIFI_SSID);
-  wifiPassword = preferences.getString("pass", DEFAULT_WIFI_PASSWORD);
-  ledEnabled = preferences.getBool("led_en", true);
-  buzzerEnabled = preferences.getBool("buz_en", true);
-  melodyMode = preferences.getInt("melody_mode", 0);
-  preferences.end();
-
-  // Initialize WiFi & Background Task
+  // Initialize WiFi
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFi.begin(wifiSsid.c_str(), wifiPassword.c_str());
@@ -1396,10 +1438,61 @@ void setup() {
     Serial.println("mDNS responder started: http://voda.local");
   }
 
+  // Start Telegram task on Core 0
   xTaskCreatePinnedToCore(
     telegramTask,
     "TelegramTask",
     8192,
+    NULL,
+    1,
+    NULL,
+    0
+  );
+
+  networkStarted = true;
+  Serial.println("Network services started. Online features enabled.");
+
+  vTaskDelete(NULL);
+}
+
+void setup() {
+  Serial.begin(115200);
+  setCpuFrequencyMhz(160); // Set CPU to max 160MHz to speed up SSL math
+  delay(300);
+  Serial.println();
+  Serial.println("Water level monitor started");
+
+  // Initialize Telegram queue
+  telegramQueue = xQueueCreate(10, sizeof(TelegramMessage));
+
+  pinMode(WATER_SENSOR_PIN, INPUT);
+
+  loadSubscribers();
+
+  // Initialize Buzzer
+  pinMode(BUZZER_PIN, OUTPUT);
+  buzzerOff();
+
+  // Initialize NeoPixels
+  led.begin();
+  led.setBrightness(180);
+  ledOnboard.begin();
+  ledOnboard.setBrightness(40);
+  setLed(colorBlue());
+
+  preferences.begin("wifi_config", false);
+  wifiSsid = preferences.getString("ssid", DEFAULT_WIFI_SSID);
+  wifiPassword = preferences.getString("pass", DEFAULT_WIFI_PASSWORD);
+  ledEnabled = preferences.getBool("led_en", true);
+  buzzerEnabled = preferences.getBool("buz_en", true);
+  melodyMode = preferences.getInt("melody_mode", 0);
+  preferences.end();
+
+  // Launch network startup task asynchronously on Core 0
+  xTaskCreatePinnedToCore(
+    networkStartupTask,
+    "NetworkStartupTask",
+    4096,
     NULL,
     1,
     NULL,
@@ -1416,8 +1509,10 @@ void setup() {
 }
 
 void loop() {
-  monitorWiFi();
-  webServer.handleClient(); // Always process webserver requests
+  if (networkStarted) {
+    monitorWiFi();
+    webServer.handleClient(); // Always process webserver requests
+  }
 
   updateSensorState();
 
