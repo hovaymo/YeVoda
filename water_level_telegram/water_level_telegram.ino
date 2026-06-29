@@ -753,6 +753,12 @@ void sendMainMenu(const String& chatId, const String& welcomeText) {
       String line = securedClient.readStringUntil('\n');
       if (line == "\r") break;
     }
+    Serial.println("sendMainMenu: Sent response successfully");
+  } else {
+    char err_buf[100];
+    securedClient.lastError(err_buf, 100);
+    Serial.print("sendMainMenu FAILED. SSL error: ");
+    Serial.println(err_buf);
   }
   securedClient.stop();
 }
@@ -1303,7 +1309,18 @@ void telegramTask(void* parameter) {
 
       securedClient.stop(); // Clean socket before request
       securedClient.setInsecure();
+      
+      Serial.println("Polling Telegram for updates...");
       int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
+      Serial.print("getUpdates returned: ");
+      Serial.println(numNewMessages);
+
+      if (numNewMessages < 0) {
+        char err_buf[100];
+        securedClient.lastError(err_buf, 100);
+        Serial.print("Telegram poll FAILED. SSL error: ");
+        Serial.println(err_buf);
+      }
 
       if (numNewMessages > 0) {
         for (int i = 0; i < numNewMessages; i++) {
@@ -1316,6 +1333,8 @@ void telegramTask(void* parameter) {
             continue; // Ignore group chats, supergroups, and channels entirely
           }
           String text = bot.messages[i].text;
+          Serial.print("Received Telegram command: ");
+          Serial.println(text);
 
           if (text == "/start") {
             registerUser(chatId);
@@ -1486,9 +1505,9 @@ void setup() {
 
   // Initialize NeoPixels
   led.begin();
-  led.setBrightness(180);
+  led.setBrightness(80);
   ledOnboard.begin();
-  ledOnboard.setBrightness(40);
+  ledOnboard.setBrightness(50);
   setLed(colorBlue());
 
   preferences.begin("wifi_config", false);
