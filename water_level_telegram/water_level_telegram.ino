@@ -1422,12 +1422,23 @@ void networkStartupTask(void* parameter) {
   wifiConnectionStartedAt = millis();
 
   // Setup Web Server routes always-on
+  const char* headers[] = {"Host"};
+  webServer.collectHeaders(headers, 1);
+
   webServer.on("/", serveConfigPage);
   webServer.on("/save", HTTP_POST, handleSave);
   webServer.on("/toggle", HTTP_GET, handleToggle);
   webServer.on("/status_json", HTTP_GET, handleStatusJson);
   webServer.on("/set_melody", HTTP_GET, handleSetMelody);
   webServer.onNotFound([]() {
+    if (apModeActive) {
+      String host = webServer.header("Host");
+      if (host.length() > 0 && !host.equals("192.168.4.1") && !host.equals("voda.local")) {
+        webServer.sendHeader("Location", "http://192.168.4.1/", true);
+        webServer.send(302, "text/plain", "");
+        return;
+      }
+    }
     serveConfigPage();
   });
   webServer.begin();
