@@ -32,8 +32,8 @@ const char* BOT_TOKEN = "8992360486:AAFE6qnkkK2D55kRQLnYbDa_aW4Spo6Qzb4";
 const bool SENSOR_LOW_MEANS_WATER_PRESENT = true;
 
 // Timing
-const unsigned long SENSOR_DEBOUNCE_MS = 300;  // Quick 300ms debounce
-const unsigned long STATE_LOCKOUT_MS = 1500;   // Ignore rapid toggles within 1.5 seconds
+const unsigned long SENSOR_DEBOUNCE_MS = 100;  // Extremely responsive 100ms debounce
+const unsigned long TELEGRAM_STABLE_DELAY_MS = 3000; // Require 3s stable state before Telegram alert
 const unsigned long TELEGRAM_MIN_REPEAT_MS = 30UL * 60UL * 1000UL;
 const unsigned long LED_EMPTY_HOLD_GREEN_MS = 0;
 const unsigned long LED_EMPTY_FADE_MS = 5000;
@@ -61,8 +61,8 @@ enum TelegramMessage {
 };
 QueueHandle_t telegramQueue = NULL;
 
-// Pre-defined robotic melodies array to cycle through (indexes 0 to 7)
-const int CUTE_MELODIES_COUNT = 8;
+// Pre-defined melodies array to cycle through (indexes 0 to 8)
+const int TOTAL_MELODIES_COUNT = 9;
 int currentMelodyIndex = 0;
 bool alarmMelodyPlayed = false;
 unsigned long lastMelodyFinishedAt = 0;
@@ -174,6 +174,17 @@ void playCuteSound(int soundName) {
         delayBuzzerLoop(200);
       }
       break;
+  }
+}
+
+void playMelody(int index) {
+  if (index == 0) {
+    // Simple beeping-alarm: 3 short beeps of 100ms at 3000Hz with 100ms silence in between
+    for (int i = 0; i < 3; i++) {
+      if (!_cuteTone(3000, 100, 100)) return;
+    }
+  } else {
+    playCuteSound(index - 1);
   }
 }
 
@@ -456,23 +467,18 @@ const char HTML_CONFIG_PAGE[] PROGMEM = R"rawliteral(
   </div>
   
   %MELODY_SPOILER_START%
-    <summary>Вибір мелодії</summary>
-    <div class="spoiler-content">
-      <div class="group">
-        <label>Мелодія тривоги</label>
-        <select id="melody-select" onchange="setMelody(this.value)">
-          <option value="0" %MELODY_SEL_0%>Всі мелодії по колу 🔁</option>
-          <option value="1" %MELODY_SEL_1%>Весела 🤖</option>
-          <option value="2" %MELODY_SEL_2%>Ніжна 🥰</option>
-          <option value="3" %MELODY_SEL_3%>Ультра-весела 🎉</option>
-          <option value="4" %MELODY_SEL_4%>Упс! 🙊</option>
-          <option value="5" %MELODY_SEL_5%>Здивування 😲</option>
-          <option value="6" %MELODY_SEL_6%>З'єднання 📡</option>
-          <option value="7" %MELODY_SEL_7%>Робот 👾</option>
-          <option value="8" %MELODY_SEL_8%>Стрибок 🦘</option>
-        </select>
-      </div>
-    </div>
+    <select id="melody-select" onchange="setMelody(this.value)">
+      <option value="0" %MELODY_SEL_0%>Всі мелодії по колу 🔁</option>
+      <option value="1" %MELODY_SEL_1%>Сигналізація 🚨</option>
+      <option value="2" %MELODY_SEL_2%>Весела 🤖</option>
+      <option value="3" %MELODY_SEL_3%>Ніжна 🥰</option>
+      <option value="4" %MELODY_SEL_4%>Ультра-весела 🎉</option>
+      <option value="5" %MELODY_SEL_5%>Упс! 🙊</option>
+      <option value="6" %MELODY_SEL_6%>Здивування 😲</option>
+      <option value="7" %MELODY_SEL_7%>З'єднання 📡</option>
+      <option value="8" %MELODY_SEL_8%>Робот 👾</option>
+      <option value="9" %MELODY_SEL_9%>Стрибок 🦘</option>
+    </select>
   %MELODY_SPOILER_END%
 </div>
 
@@ -753,12 +759,6 @@ void sendMainMenu(const String& chatId, const String& welcomeText) {
       String line = securedClient.readStringUntil('\n');
       if (line == "\r") break;
     }
-    Serial.println("sendMainMenu: Sent response successfully");
-  } else {
-    char err_buf[100];
-    securedClient.lastError(err_buf, 100);
-    Serial.print("sendMainMenu FAILED. SSL error: ");
-    Serial.println(err_buf);
   }
   securedClient.stop();
 }
@@ -894,7 +894,7 @@ void updateWaterBuzzer(bool waterPresent) {
     
     // Play the preview melody in a loop with 0.2s pause
     if (!previewMelodyPlayed) {
-      playCuteSound(previewMelodyIndex);
+      playMelody(previewMelodyIndex);
       previewMelodyPlayed = true;
       lastPreviewMelodyFinishedAt = millis();
     } else {
@@ -913,7 +913,7 @@ void updateWaterBuzzer(bool waterPresent) {
     buzzerOff();
     if (alarmMelodyPlayed) {
       // Only increment the index if the alarm actually went off (played at least once)
-      currentMelodyIndex = (currentMelodyIndex + 1) % CUTE_MELODIES_COUNT;
+      currentMelodyIndex = (currentMelodyIndex + 1) % TOTAL_MELODIES_COUNT;
       alarmMelodyPlayed = false;
     }
     buzzerSequenceState = 0;
@@ -926,6 +926,12 @@ void updateWaterBuzzer(bool waterPresent) {
     buzzerSequenceState = 0;
     nextBuzzerActionAt = 0;
     return;
+  }
+
+  // If the water has been missing for more than 5 seconds, jump straight to the melody (state 6)
+  if (millis() - waterMissingStartedAt >= 5000 && buzzerSequenceState < 6) {
+    buzzerSequenceState = 6;
+    nextBuzzerActionAt = millis();
   }
 
   // State machine for initial beeps (0 to 5 seconds)
@@ -976,7 +982,7 @@ void updateWaterBuzzer(bool waterPresent) {
   if (millis() >= nextBuzzerActionAt) {
     if (!alarmMelodyPlayed) {
       int targetMelodyIdx = (melodyMode == 0) ? currentMelodyIndex : (melodyMode - 1);
-      playCuteSound(targetMelodyIdx);
+      playMelody(targetMelodyIdx);
       
       alarmMelodyPlayed = true;
       lastMelodyFinishedAt = millis();
@@ -1047,11 +1053,11 @@ void serveConfigPage() {
     html.replace("%WIFI_FORM_START%", "");
     html.replace("%WIFI_FORM_END%", "");
   }
-  // Melody selector spoiler always rendered (outside Wi-Fi spoiler)
-  html.replace("%MELODY_SPOILER_START%", "<details style=\"margin-top: 20px;\">");
-  html.replace("%MELODY_SPOILER_END%", "</details>");
+  // Melody selector dropdown always rendered (outside Wi-Fi spoiler)
+  html.replace("%MELODY_SPOILER_START%", "<div class=\"group\" style=\"margin-top: 20px; margin-bottom: 20px;\"><label>Вибір мелодії</label>");
+  html.replace("%MELODY_SPOILER_END%", "</div>");
   
-  for (int i = 0; i <= 8; i++) {
+  for (int i = 0; i <= 9; i++) {
     String placeholder = "%MELODY_SEL_" + String(i) + "%";
     String replacement = (melodyMode == i) ? "selected" : "";
     html.replace(placeholder, replacement);
@@ -1071,8 +1077,8 @@ void handleSetMelody() {
     
     webServer.send(200, "text/plain", "OK");
     
-    // If a specific melody is selected (1-8), trigger the 3s preview asynchronously
-    if (melodyMode >= 1 && melodyMode <= 8) {
+    // If a specific melody is selected (1-9), trigger the 3s preview asynchronously
+    if (melodyMode >= 1 && melodyMode <= 9) {
       previewMelodyIndex = melodyMode - 1;
       previewStartedAt = millis();
       previewActive = true;
@@ -1309,18 +1315,7 @@ void telegramTask(void* parameter) {
 
       securedClient.stop(); // Clean socket before request
       securedClient.setInsecure();
-      
-      Serial.println("Polling Telegram for updates...");
       int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-      Serial.print("getUpdates returned: ");
-      Serial.println(numNewMessages);
-
-      if (numNewMessages < 0) {
-        char err_buf[100];
-        securedClient.lastError(err_buf, 100);
-        Serial.print("Telegram poll FAILED. SSL error: ");
-        Serial.println(err_buf);
-      }
 
       if (numNewMessages > 0) {
         for (int i = 0; i < numNewMessages; i++) {
@@ -1333,8 +1328,6 @@ void telegramTask(void* parameter) {
             continue; // Ignore group chats, supergroups, and channels entirely
           }
           String text = bot.messages[i].text;
-          Serial.print("Received Telegram command: ");
-          Serial.println(text);
 
           if (text == "/start") {
             registerUser(chatId);
@@ -1375,6 +1368,11 @@ void handleNotifications() {
 
   const unsigned long now = millis();
 
+  // Only send notifications if the state has remained stable for at least 3 seconds
+  if (now - lastStateChangeAt < TELEGRAM_STABLE_DELAY_MS) {
+    return;
+  }
+
   if (!stableWaterPresent) {
     const bool repeatAllowed = (lastEmptyNotificationAt == 0) || (now - lastEmptyNotificationAt >= TELEGRAM_MIN_REPEAT_MS);
     if (!lastNotifiedEmpty || repeatAllowed) {
@@ -1402,12 +1400,10 @@ void updateSensorState() {
 
   if (now - rawChangedAt >= SENSOR_DEBOUNCE_MS) {
     if (currentRaw != stableWaterPresent) {
-      if (lastStateChangeAt == 0 || (now - lastStateChangeAt >= STATE_LOCKOUT_MS)) {
-        stableWaterPresent = currentRaw;
-        lastStateChangeAt = now;
-        Serial.print("State changed to: ");
-        Serial.println(stableWaterPresent ? "WATER PRESENT" : "WATER EMPTY");
-      }
+      stableWaterPresent = currentRaw;
+      lastStateChangeAt = now;
+      Serial.print("State changed to: ");
+      Serial.println(stableWaterPresent ? "WATER PRESENT" : "WATER EMPTY");
     }
   }
 }
@@ -1505,9 +1501,9 @@ void setup() {
 
   // Initialize NeoPixels
   led.begin();
-  led.setBrightness(80);
+  led.setBrightness(200);
   ledOnboard.begin();
-  ledOnboard.setBrightness(50);
+  ledOnboard.setBrightness(200);
   setLed(colorBlue());
 
   preferences.begin("wifi_config", false);
