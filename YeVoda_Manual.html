@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>YeVoda — Інструкція користувача</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --card-bg: #1e293b;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0ea5e9;
+      --accent-yellow: #f59e0b;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --border-color: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      line-height: 1.6;
+      padding: 40px 20px;
+    }
+
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background-color: var(--card-bg);
+      border-radius: 16px;
+      padding: 40px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+      border: 1px solid var(--border-color);
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+      border-bottom: 2px solid var(--border-color);
+      padding-bottom: 30px;
+      position: relative;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .logo-icon {
+      color: var(--primary);
+      animation: pulse 2s infinite ease-in-out;
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      background: linear-gradient(to right, #38bdf8, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: var(--text-muted);
+      margin-top: 5px;
+    }
+
+    h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--primary);
+      margin-top: 30px;
+      margin-bottom: 15px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border-left: 4px solid var(--primary);
+      padding-left: 12px;
+    }
+
+    p {
+      margin-bottom: 15px;
+      color: #e2e8f0;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-left: 8px;
+    }
+
+    .badge-offline {
+      background-color: rgba(245, 158, 11, 0.15);
+      color: var(--accent-yellow);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+
+    .badge-online {
+      background-color: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    ul, ol {
+      margin-bottom: 20px;
+      padding-left: 20px;
+    }
+
+    li {
+      margin-bottom: 8px;
+      color: #e2e8f0;
+    }
+
+    .step-card {
+      background-color: rgba(15, 23, 42, 0.4);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .step-card:hover {
+      border-color: #475569;
+    }
+
+    .step-title {
+      font-weight: 600;
+      font-size: 16px;
+      color: var(--text-main);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .step-number {
+      background-color: var(--primary);
+      color: var(--bg-dark);
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .status-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      font-size: 14px;
+    }
+
+    .status-table th, .status-table td {
+      border: 1px solid var(--border-color);
+      padding: 12px;
+      text-align: left;
+    }
+
+    .status-table th {
+      background-color: rgba(15, 23, 42, 0.6);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .status-table tr:nth-child(even) {
+      background-color: rgba(30, 41, 59, 0.4);
+    }
+
+    .color-dot {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .dot-blue { background-color: var(--primary); }
+    .dot-green { background-color: var(--accent-green); }
+    .dot-red { background-color: var(--accent-red); }
+
+    .print-btn-container {
+      text-align: center;
+      margin-top: 30px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background-color: var(--primary);
+      color: var(--bg-dark);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: none;
+      font-size: 15px;
+      transition: background-color 0.2s ease, transform 0.1s ease;
+      box-shadow: 0 4px 6px -1px rgba(56, 189, 248, 0.2);
+    }
+
+    .btn:hover {
+      background-color: var(--primary-hover);
+    }
+
+    .btn:active {
+      transform: scale(0.98);
+    }
+
+    .highlight-box {
+      background-color: rgba(245, 158, 11, 0.08);
+      border-left: 4px solid var(--accent-yellow);
+      padding: 15px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+
+    .highlight-box p {
+      margin: 0;
+      color: #ffedd5;
+      font-size: 14px;
+    }
+
+    footer {
+      margin-top: 40px;
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border-color);
+      padding-top: 20px;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
+    }
+
+    /* Print Styles: Optimized for A4 Printing */
+    @media print {
+      body {
+        background-color: #ffffff;
+        color: #000000;
+        padding: 0;
+        font-size: 11pt;
+      }
+
+      .container {
+        border-radius: 0;
+        border: none;
+        padding: 0;
+        margin: 0;
+        max-width: 100%;
+        background-color: #ffffff;
+        box-shadow: none;
+      }
+
+      h1 {
+        background: none;
+        -webkit-text-fill-color: initial;
+        color: #0284c7;
+      }
+
+      h2 {
+        color: #0284c7;
+        border-left-color: #0284c7;
+      }
+
+      p, li, td {
+        color: #1e293b;
+      }
+
+      .step-card {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        page-break-inside: avoid;
+      }
+
+      .status-table th {
+        background-color: #f1f5f9;
+        color: #0f172a;
+        border-color: #cbd5e1;
+      }
+
+      .status-table td, .status-table tr {
+        border-color: #cbd5e1;
+      }
+
+      .status-table tr:nth-child(even) {
+        background-color: #f8fafc;
+      }
+
+      .highlight-box {
+        background-color: #fffbeb;
+        border-left-color: #d97706;
+        border-top: 1px solid #fef3c7;
+        border-right: 1px solid #fef3c7;
+        border-bottom: 1px solid #fef3c7;
+      }
+
+      .highlight-box p {
+        color: #78350f;
+      }
+
+      .print-btn-container {
+        display: none;
+      }
+
+      .badge-offline {
+        background-color: #fef3c7;
+        color: #d97706;
+        border-color: #fef3c7;
+      }
+
+      .badge-online {
+        background-color: #e0f2fe;
+        color: #0369a1;
+        border-color: #e0f2fe;
+      }
+
+      footer {
+        border-top-color: #e2e8f0;
+        color: #64748b;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div class="logo-container">
+      <svg class="logo-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+      </svg>
+      <h1>YeVoda</h1>
+    </div>
+    <div class="subtitle">Інструкція з налаштування та експлуатації сигналізатора води</div>
+  </header>
+
+  <section>
+    <h2>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      Про пристрій
+    </h2>
+    <p>
+      <strong>YeVoda (ЄВода)</strong> — це розумний пристрій безпеки, призначений для автоматичного відстеження рівня води в баку або накопичувальній ємності. Пристрій може працювати у двох основних режимах: повністю автономно (як офлайн-сигналізатор) або з підключенням до мережі Інтернет для дистанційного моніторингу через Telegram.
+    </p>
+
+    <h3>Світлова та звукова індикація:</h3>
+    <table class="status-table">
+      <thead>
+        <tr>
+          <th>Колір індикатора</th>
+          <th>Стан системи</th>
+          <th>Звуковий сигнал (Бузер)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="color-dot dot-blue"></span> Синій (мигає)</td>
+          <td>Запуск системи / Підключення до Wi-Fi</td>
+          <td>Мовчить</td>
+        </tr>
+        <tr>
+          <td><span class="color-dot dot-green"></span> Зелений (постійно)</td>
+          <td>Вода присутня 🟢</td>
+          <td>Мовчить</td>
+        </tr>
+        <tr>
+          <td><span class="color-dot dot-red"></span> Червоний (мигає)</td>
+          <td>Вода відсутня 🔴</td>
+          <td>Початкові сигнали, далі обрана мелодія</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+      Режим 1. Автономна робота (Без Інтернету)
+      <span class="badge badge-offline">Офлайн</span>
+    </h2>
+    <p>
+      У цьому режимі пристрій працює як простий, але надійний локальний сигналізатор. Для його роботи потрібна лише розетка (живлення Micro-USB/Type-C 5V) та підключений датчик рівня.
+    </p>
+
+    <div class="step-card">
+      <div class="step-title"><span class="step-number">1</span> Перше ввімкнення</div>
+      <p>Підключіть живлення до пристрою. Він миттєво почне сканувати датчик води. Світлодіод засвітиться синім, а потім зміниться на зелений (вода є) або червоний (води немає).</p>
+    </div>
+
+    <div class="step-card">
+      <div class="step-title"><span class="step-number">2</span> Вхід у панель налаштувань</div>
+      <p>Якщо пристрій не підключено до домашньої мережі Wi-Fi, через 15 секунд після старту він створить власну Wi-Fi мережу з назвою <strong>"YeVoda"</strong> (без пароля). Підключіться до неї з вашого телефону або ноутбука.</p>
+    </div>
+
+    <div class="step-card">
+      <div class="step-title"><span class="step-number">3</span> Керування пристроєм</div>
+      <p>Після підключення до Wi-Fi "YeVoda" на екрані вашого смартфона автоматично відкриється вікно налаштувань (Captive Portal). Якщо цього не сталося, відкрийте будь-який браузер і перейдіть за адресою: <strong>http://192.168.4.1</strong> або <strong>http://voda.local</strong>.</p>
+      <p>На цій сторінці ви можете:</p>
+      <ul>
+        <li>Вмикати або вимикати світлодіодну індикацію.</li>
+        <li>Вмикати або вимикати звук бузера.</li>
+        <li>Змінювати мелодію тривоги (доступно 9 варіантів, зокрема класична сирена). Обрана мелодія відтворюється на 3 секунди для демонстрації.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20" stroke-width="3"/></svg>
+      Режим 2. Розумна робота (З Інтернетом)
+      <span class="badge badge-online">Онлайн</span>
+    </h2>
+    <p>
+      Режим забезпечує можливість перевірки стану води з будь-якої точки світу через Інтернет, а також миттєве сповіщення про зміну стану в Telegram.
+    </p>
+
+    <div class="step-card">
+      <div class="step-title"><span class="step-number">1</span> Підключення до домашнього Wi-Fi</div>
+      <p>Увійдіть у панель налаштувань (підключившись до точки доступу "YeVoda" через браузер за адресою <strong>http://192.168.4.1</strong>). Розгорніть блок <strong>«Налаштування Wi-Fi»</strong>, введіть назву (SSID) та пароль вашої домашньої Wi-Fi мережі й натисніть <strong>«Зберегти»</strong>. Пристрій перезавантажиться та підключиться до інтернету.</p>
+    </div>
+
+    <div class="step-card">
+      <div class="step-title"><span class="step-number">2</span> Налаштування Telegram-бота</div>
+      <p>Для отримання сповіщень виконайте наступні кроки:</p>
+      <ol>
+        <li>Знайдіть у Telegram бота з назвою <strong>@YeVodaBot</strong> (або перейдіть за посиланням, якщо воно наявне).</li>
+        <li>Відкрийте діалог із ботом і надішліть команду <strong>/start</strong>.</li>
+        <li>Бот зареєструє вас і покаже зручні кнопки керування чатом.</li>
+      </ol>
+    </div>
+
+    <div class="step-card">
+      <div class="step-title"><span class="step-number">3</span> Керування через Telegram</div>
+      <p>Ви можете взаємодіяти з ботом за допомогою вбудованих кнопок:</p>
+      <ul>
+        <li><strong>«Є вода? 💧»</strong> — миттєва перевірка поточного стану води в баку.</li>
+        <li><strong>«Не сповіщати 🔕» / «Підписатись 🔔»</strong> — швидке увімкнення або вимкнення автоматичних пуш-сповіщень.</li>
+      </ul>
+    </div>
+
+    <div class="highlight-box">
+      <p><strong>Важливо:</strong> Бот надсилає миттєві сповіщення, як тільки стан датчика змінюється: наприклад, «Вода закінчилась. ⚠️» або «Вода з'явилась. 💧».</p>
+    </div>
+  </section>
+
+  <div class="print-btn-container no-print">
+    <button class="btn" onclick="window.print()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+      Друкувати інструкцію (Зберегти в PDF)
+    </button>
+  </div>
+
+  <footer>
+    <p>Розроблено для пристроїв YeVoda © 2026. Усі права захищено.</p>
+  </footer>
+</div>
+
+</body>
+</html>
